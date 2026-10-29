@@ -1,0 +1,44 @@
+# Estado del proyecto
+
+Origen: plantilla NestJS 11. Adaptación inspirada en Kraken y backend-synctasks, simplificada y reimplementada localmente sin código de multitenencia.
+
+Implementado: identity (usuarios y permisos), auth (login, refresh, logout, me), invitaciones por correo, recuperación de contraseña, contratos CRUD, PostgreSQL/Sequelize con migraciones, bootstrap de administrador, validación de variables/DTO, CORS explícito, límite de solicitudes en memoria, adaptador privado de GCS, carga opcional de Secret Manager, Docker y pruebas de integración aisladas.
+
+No se han creado recursos ni desplegado a Google Cloud. No se han configurado credenciales reales, bucket, SMTP o base de desarrollo del usuario. StorageModule exporta FileStorage como servicio interno: aún no hay endpoints de archivos, metadatos ni vínculo con pacientes. Al construirlos, autorizar por expediente antes de firmar un enlace y validar contenido real del archivo (el adaptador actual solo limita MIME declarado y tamaño).
+
+Pendiente por alcance de negocio: pacientes, citas, expedientes, odontólogos, permisos clínicos, interfaz de administración de roles, notificaciones generales, workflows/chains durables, auditoría clínica y retención/limpieza de sesiones y tokens expirados. Kraken tiene más funciones que las incluidas aquí; no asumir paridad completa. Los flujos de correo usan SMTP y no un outbox: un fallo de envío requiere reintentar la solicitud. Los enlaces esperan pantallas del frontend /accept-invitation y /reset-password con token en fragmento URL.
+
+Limitador por proceso: para múltiples instancias usar almacenamiento compartido y configurar proxy de confianza con topología conocida antes de basarse en IP reenviada.
+
+Lee README.md para arranque y comandos. No crear una cuenta de administrador automáticamente ni introducir contraseñas fijas.
+
+Verificación final: build y lint correctos; 5 pruebas unitarias y 7 de integración con PostgreSQL efímero correctas. Google Cloud y SMTP reales no se probaron. npm audit informa 12 avisos transitivos (8 bajos, 4 moderados), incluyendo uuid de Sequelize; no se aplicaron degradaciones incompatibles. Multer fijado mediante override a ^2.5.0 para resolver los avisos altos detectados. Revisar compatibilidad antes de cambiar Sequelize o forzar actualizaciones.
+
+
+Actualización de formato y pruebas: reglas de backend-synctasks trasladadas a ESLint 9, Prettier unificado a 120 columnas, documentación JSDoc y organización src/test por módulo. Verificación anterior: 67 pruebas aisladas y 7 de integración; 100% de líneas y funciones en casos de uso y controladores. Se verifican tipos de pruebas por separado y se excluyen helpers de la compilación productiva. Consultar .codex/testing.md.
+
+Servicios locales: el compose se movió a docker/docker-compose.yaml e incluye PostgreSQL 17 y Mailpit, con volúmenes separados y puertos configurables. Usar --env-file .env desde la raíz. Se conserva el nombre del proyecto api-blue-dent y el volumen blue-dent-data. El usuario ya tiene Mailpit: no iniciar contenedores ni ejecutar pruebas que creen contenedores por esta petición. Se puede iniciar solo postgres y reutilizar el correo existente.
+
+Estado vigente: los módulos identity y auth poseen sus archivos *.permissions.ts. src/permissions.ts solo define superadmin/admin/customer y sus políticas; superadmin usa "*" y se resuelve a todos los permisos registrados por infraestructura. La migración 003 roles-permissions es exclusivamente DDL y deja las cuatro tablas vacías; npm run permissions llena y sincroniza el catálogo y roles. La migración 004 agrega firstName, lastName, verified y adapta roles de invitaciones; conserva columnas legacy para que la sincronización convierta grants anteriores de forma idempotente. Instalaciones con la versión anterior de 003 pueden aplicar 004 sin revertir datos.
+
+npm run createSuperUser ejecuta un asistente de terminal para nombre, apellido, email y contraseña oculta con confirmación. Primero sincroniza permisos; después crea una cuenta nueva habilitada y verificada con rol superadmin. Funciona aunque haya usuarios; emails duplicados no se modifican. admin:create es alias. Se retiró la provisión por ADMIN_* y la promoción por --superadmin-email. No se han ejecutado comandos de provisión sobre la base real del usuario.
+
+Validación vigente: 88 pruebas aisladas, 10 de integración con PostgreSQL temporal sin Docker. Verificados DDL sin semillas, sincronización repetida, preservación legacy ejecutada por el script y provisión verificada con password hash y duplicados rechazados. Los servicios y contenedores del usuario siguen intactos.
+
+Aclaración vigente de nombres: se conservan los nombres y sufijos habituales (.controller.ts, .module.ts, .dto.ts, .inputs.ts, .permissions.ts); solo .use-case.ts se normalizó a .usecase.ts, también en los specs. Se restauraron el módulo authorization, user.inputs.ts y las tablas originales, descartando la propuesta de renombrado general a camelCase. La migración temporal de renombrado de tablas se retiró sin aplicarla a bases del usuario.
+
+Migraciones: npm run db:migrate aplica pendientes; npm run db:migrate:reset revierte todas mediante db:migrate:undo:all y solo si termina correctamente vuelve a migrar. El reset elimina los datos de las tablas de la API y no sincroniza permisos automáticamente. Se añadió el comando sin ejecutarlo sobre ninguna base de datos.
+
+Política vigente de contraseñas: mínimo 8 caracteres al crear usuarios, aceptar invitaciones, restablecer contraseña y crear superusuarios por consola. Se mantienen composición, máximo 72 bytes UTF-8 y bcrypt coste 12.
+
+Verificación de mínimo 8: formato, lint, tipos y compilación correctos; 92 pruebas aisladas y 10 de integración con PostgreSQL temporal, incluida creación y login de superusuario con contraseña de exactamente 8 caracteres. Sin cambios en bases o contenedores del usuario.
+
+Limpieza de permisos legacy: se inspeccionó la base del usuario en modo solo lectura y se confirmó un superadmin con los 8 permisos del catálogo; users.permissions era un ARRAY antiguo vacío, mostrado como {}. La migración 005 remove-legacy-permissions retira esa columna y la homónima de account_actions sin reconstruir usuarios; rechaza grants históricos pendientes de conversión. Se mantiene permissions solo como dato derivado en entidades/vistas. También se corrigió la actualización de usuarios para guardar sus roles en user_roles de forma transaccional. Se verificaron 92 pruebas aisladas y 11 de integración en PostgreSQL temporal, además de preservación legacy y rechazo de borrado antes de convertir grants. No se aplicaron migraciones ni actualizaciones a la base real del usuario.
+
+Seeder nuevo: database/seeders/202610280001-test-users.cjs, registrado en .sequelizerc. db:seed sincroniza el catálogo y crea superadmin@blue-dent.test, admin@blue-dent.test y customer@blue-dent.test, habilitados/verificados con Pa$$word123 (hash bcrypt). IDs reservados permiten repetir y revertir sin duplicar o borrar otras cuentas; conflictos se rechazan. db:migrate:reset ejecuta seeders al terminar la reconstrucción. No se han ejecutado seeders ni reset sobre la base real del usuario.
+
+Verificación del seeder: 92 pruebas aisladas y 12 de integración correctas. Se ejecutó db:migrate:reset completo exclusivamente en PostgreSQL temporal y se comprobó que terminó con exactamente tres usuarios verificados, cada uno en su rol y autenticable con Pa$$word123; la repetición, reversión y los conflictos con otras cuentas se probaron. No se ejecutaron seeders ni reset sobre la base del usuario.
+
+M01 actualizado según RF-001–RF-004: consultar .codex/m01-authentication.md. Pacientes se representan provisionalmente como customers. Se implementaron identidad no verificada por defecto en altas HTTP, activación por contacto registrado, cambio de contraseña, verificación de email nuevo antes de modificarlo y propiedad de identidad adicional a permisos. Invitaciones ahora son registros persistentes con metadatos, estados, fechas, invitador, aceptación, listado, preview público por token, reenvío con rotación/cooldown, revocación y estado SMTP. Migración 006 preserva tokens de invitaciones antiguas y agrega los campos de verificación de contacto. Scripts operativos y seeders siguen generando usuarios verificados explícitamente. No hay módulo clínico ni membresías comerciales automáticas; extender propiedad a pacientes cuando se agreguen sus recursos.
+
+Pruebas vigentes: 140 aisladas y 16 de integración en PostgreSQL temporal; tokens de invitación/recuperación concurrentes, activación de customer/staff, aislamiento A/B, cambio de canal sin vinculación previa a prueba y revocación de sesiones comprobados. Correos y enlaces SMTP probados con transporte simulado, sin mensajes reales. No se aplicaron migraciones ni se modificó la base real o contenedores del usuario.
