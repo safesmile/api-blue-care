@@ -1,0 +1,13 @@
+Te damos la bienvenida
+
+Hola Ana López.
+
+Recepción Blue Care te ha invitado a Blue Care.
+
+Te invitamos a crear tu cuenta para consultar tu información y acceder a los servicios disponibles.
+
+La invitación vence el 16 de enero de 2030, 10:00 a. m. (hora de Guatemala).
+
+Aceptar invitación: https://blue-care.example/accept-invitation?token=vista-previa-sin-validez
+
+Esta invitación es personal y su enlace es de un solo uso. Si no esperabas este correo, puedes ignorarlo.

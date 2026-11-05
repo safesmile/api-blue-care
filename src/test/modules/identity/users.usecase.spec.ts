@@ -1,72 +1,95 @@
-import { NotFoundException } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, NotFoundException } from "@nestjs/common";
 import { UsersUseCase } from "../../../modules/identity/application/users.usecase";
 import { identityFixture, userFixture } from "../../helpers/identity.fixture";
-describe("UsersUseCase", () => {
-  let dependencies: ReturnType<typeof identityFixture>;
-  let useCase: UsersUseCase;
+import type { RolesRepository } from "../../../modules/authorization/domain/roles.repository";
+import { REGISTERED_PERMISSIONS } from "../../../modules/authorization/infrastructure/permission-registry";
+describe("UsersUseCase policies and canonical profiles", () => {
+  const actor = {
+    ...userFixture().toView(),
+    roles: ["superadmin"],
+    permissions: REGISTERED_PERMISSIONS.map(p => p.shortcode)
+  };
+  const input = {
+    firstName: " Ana ",
+    lastName: " López ",
+    email: " ANA@BLUE.TEST ",
+    password: "Abcd123!",
+    roles: ["customer"]
+  };
+  let deps: ReturnType<typeof identityFixture>, useCase: UsersUseCase;
+  const authorizeAssignment = jest.fn();
   beforeEach(() => {
-    dependencies = identityFixture();
-    useCase = new UsersUseCase(dependencies.users, dependencies.passwords);
+    jest.clearAllMocks();
+    deps = identityFixture();
+    useCase = new UsersUseCase(deps.users, deps.passwords, { authorizeAssignment } as unknown as RolesRepository);
   });
-  it("normalizes email, hashes the password and excludes the hash from the result", async () => {
-    const result = await useCase.create({
-      email: " ADMIN@BLUE.TEST ",
-      name: "Admin",
-      password: "SecretPassword1!",
-      roles: []
+  it("normalizes both name parts and derives the full name without truncation", async () => {
+    const user = await useCase.create(input, actor);
+    expect(user).toMatchObject({
+      firstName: "Ana",
+      lastName: "López",
+      name: "Ana López",
+      email: "ana@blue.test",
+      verified: false
     });
-    expect(dependencies.passwords.hash).toHaveBeenCalledWith("SecretPassword1!");
-    expect(dependencies.users.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        props: expect.objectContaining({ email: "admin@blue.test", passwordHash: "new-hash", enabled: true })
-      })
-    );
-    expect(result).not.toHaveProperty("passwordHash");
+    expect(user).not.toHaveProperty("passwordHash");
+    expect(authorizeAssignment).toHaveBeenCalledWith(["customer"], actor);
   });
-  it("reads a user view", async () => {
-    const user = userFixture();
-    dependencies.users.read.mockResolvedValue(user);
-    expect(await useCase.read(user.id)).toEqual(user.toView());
+  it("denies missing actors and permissions, owner scope and protected account mutations", async () => {
+    await expect(useCase.create(input)).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(useCase.read("other", { ...actor, permissions: [] })).rejects.toBeInstanceOf(ForbiddenException);
+    const owner = { ...userFixture().toView(), permissions: ["users:read"] as ["users:read"] };
+    await expect(useCase.read("other", owner)).rejects.toBeInstanceOf(ForbiddenException);
+    const target = userFixture();
+    target.props.roles = ["superadmin"];
+    deps.users.read.mockResolvedValue(target);
+    const staff = { ...actor, roles: ["reception"] };
+    await expect(useCase.update(target.id, {}, staff)).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(useCase.delete(target.id, staff)).rejects.toBeInstanceOf(ForbiddenException);
+    expect(deps.users.update).not.toHaveBeenCalled();
   });
-  it("lists safe views with pagination and total", async () => {
-    const user = userFixture();
-    dependencies.users.list.mockResolvedValue({ items: [user], total: 8 });
-    expect(await useCase.list({ limit: 1, offset: 2 })).toEqual({ items: [user.toView()], total: 8 });
-    expect(dependencies.users.list).toHaveBeenCalledWith({ limit: 1, offset: 2 });
+  it("rejects empty or oversized combined names before persisting", async () => {
+    await expect(useCase.create({ ...input, firstName: "" }, actor)).rejects.toBeInstanceOf(BadRequestException);
+    await expect(
+      useCase.create({ ...input, firstName: "a".repeat(60), lastName: "b".repeat(60) }, actor)
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
-  it("updates the permitted properties", async () => {
+  it("reads and lists safe views", async () => {
     const user = userFixture();
-    dependencies.users.read.mockResolvedValue(user);
-    expect(await useCase.update(user.id, { name: "Dentist", enabled: false, roles: [] })).toMatchObject({
-      name: "Dentist",
-      enabled: false,
-      roles: []
+    deps.users.read.mockResolvedValue(user);
+    deps.users.list.mockResolvedValue({ items: [user], total: 1 });
+    expect(await useCase.read(user.id, actor)).toEqual(user.toView());
+    expect(await useCase.list({ limit: 25, offset: 0 }, actor)).toEqual({ items: [user.toView()], total: 1 });
+    expect(await useCase.read(user.id, { ...user.toView(), permissions: ["users:read"] })).toEqual(user.toView());
+  });
+  it("updates names atomically and preserves omitted fields and roles", async () => {
+    const user = userFixture();
+    user.props.lastName = "Example";
+    deps.users.read.mockResolvedValue(user);
+    expect(await useCase.update(user.id, { firstName: " New " }, actor)).toMatchObject({
+      name: "New Example",
+      firstName: "New"
     });
-    expect(dependencies.users.update).toHaveBeenCalledWith(user);
+    expect(await useCase.update(user.id, { lastName: " Surname " }, actor)).toMatchObject({ name: "New Surname" });
+    expect(await useCase.update(user.id, {}, actor)).toMatchObject({ roles: ["customer"], enabled: true });
+    expect(deps.users.update).toHaveBeenLastCalledWith(user, actor, false);
+    await useCase.update(user.id, { enabled: false, roles: [] }, actor);
+    expect(deps.users.update).toHaveBeenLastCalledWith(user, actor, true);
+    expect(user.props.enabled).toBe(false);
   });
-  it("deletes an existing user", async () => {
-    dependencies.users.read.mockResolvedValue(userFixture());
-    await useCase.delete("id");
-    expect(dependencies.users.delete).toHaveBeenCalledWith("id");
+  it("requires both parts when a historical profile cannot be completed safely", async () => {
+    deps.users.read.mockResolvedValue(userFixture());
+    await expect(useCase.update(actor.id, { firstName: "New" }, actor)).rejects.toBeInstanceOf(BadRequestException);
   });
-  it.each(["read", "update", "delete"] as const)("rejects %s for a missing user", async operation => {
-    dependencies.users.read.mockResolvedValue(null);
-    const result = operation === "update" ? useCase.update("missing", {}) : useCase[operation]("missing");
-    await expect(result).rejects.toBeInstanceOf(NotFoundException);
-    expect(dependencies.users.update).not.toHaveBeenCalled();
-    expect(dependencies.users.delete).not.toHaveBeenCalled();
-  });
-  it("propagates persistence failures", async () => {
-    dependencies.users.list.mockRejectedValue(new Error("database unavailable"));
-    await expect(useCase.list({ limit: 25, offset: 0 })).rejects.toThrow("database unavailable");
-  });
-  it("keeps omitted update fields instead of clearing their role assignments", async () => {
-    const user = userFixture();
-    dependencies.users.read.mockResolvedValue(user);
-    expect(await useCase.update(user.id, { name: undefined, roles: undefined, enabled: undefined })).toEqual(
-      user.toView()
-    );
-    expect(user.props.roles).toEqual(["customer"]);
-    expect(user.props.enabled).toBe(true);
+  it("deletes and propagates missing records and storage errors", async () => {
+    deps.users.read.mockResolvedValue(userFixture());
+    await useCase.delete(actor.id, actor);
+    expect(deps.users.delete).toHaveBeenCalledWith(actor.id, actor);
+    deps.users.read.mockResolvedValue(null);
+    await expect(useCase.read("missing", actor)).rejects.toBeInstanceOf(NotFoundException);
+    await expect(useCase.update("missing", {}, actor)).rejects.toBeInstanceOf(NotFoundException);
+    await expect(useCase.delete("missing", actor)).rejects.toBeInstanceOf(NotFoundException);
+    deps.users.list.mockRejectedValue(new Error("unavailable"));
+    await expect(useCase.list({ limit: 25, offset: 0 }, actor)).rejects.toThrow("unavailable");
   });
 });

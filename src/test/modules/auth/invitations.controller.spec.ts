@@ -76,7 +76,7 @@ describe("InvitationsController", () => {
     await request(app.getHttpServer())
       .post("/auth/invitations/" + id + "/revoke")
       .expect(204);
-    expect(invitations.revoke).toHaveBeenCalledWith(id);
+    expect(invitations.revoke).toHaveBeenCalledWith(id, actor);
   });
   it("rejects invalid identifiers before resending", async () => {
     await request(app.getHttpServer()).post("/auth/invitations/invalid/resend").expect(400);

@@ -8,7 +8,7 @@ import { loadSecrets } from "./infrastructure/config/load-secrets";
 async function bootstrap() {
   await loadSecrets();
   const { AppModule } = await import("./app.module.js");
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, { rawBody: true });
   const config = app.get(ConfigService);
   app.setGlobalPrefix("api/v1");
   app.enableCors({

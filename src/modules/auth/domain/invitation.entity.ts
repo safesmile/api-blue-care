@@ -3,6 +3,7 @@ import type { UserView } from "../../identity/domain/user";
 export type InvitationStatus = "pending" | "accepted" | "revoked" | "expired";
 export type InvitationActor = Pick<UserView, "id" | "name" | "email" | "roles" | "permissions">;
 export interface InvitationProps {
+  patientId?: string | null;
   email: string;
   firstName: string;
   lastName: string;
@@ -56,6 +57,7 @@ export class Invitation extends Entity<InvitationProps> {
     } = this.props;
     return {
       id: this.id,
+      patientId: this.props.patientId ?? null,
       email,
       firstName,
       lastName,

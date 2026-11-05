@@ -1,0 +1,7 @@
+Activa tu cuenta
+
+Tu cuenta está lista para activarse. Verifica tu correo electrónico y establece tu contraseña para comenzar.
+
+Activar mi cuenta: https://blue-care.example/activate-account?token=vista-previa-sin-validez
+
+Este enlace es de un solo uso y vence en 30 minutos. Si no reconoces esta solicitud, puedes ignorar este correo.

@@ -1,3 +1,4 @@
+import { EmailModule } from "../../infrastructure/email/email.module";
 import { InvitationModel } from "./infrastructure/invitation.model";
 import { InvitationRepository } from "./domain/invitation.repository";
 import { SequelizeInvitationRepository } from "./infrastructure/sequelize-invitation.repository";
@@ -27,6 +28,7 @@ import { AccountActionsController } from "./presentation/account-actions.control
  */
 @Module({
   imports: [
+    EmailModule,
     IdentityModule,
     AuthorizationModule,
     SequelizeModule.forFeature([SessionModel, AccountActionModel, InvitationModel]),

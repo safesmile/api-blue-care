@@ -6,6 +6,7 @@ import type { InvitationProps, InvitationStatus } from "../domain/invitation.ent
 @Table({ tableName: "invitations", timestamps: false })
 export class InvitationModel extends Model implements InvitationProps {
   @PrimaryKey @Column(DataType.UUID) declare id: string;
+  @Column(DataType.UUID) declare patientId: string | null;
   @Column(DataType.STRING(254)) declare email: string;
   @Column(DataType.STRING(60)) declare firstName: string;
   @Column(DataType.STRING(60)) declare lastName: string;

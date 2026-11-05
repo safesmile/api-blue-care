@@ -1,4 +1,10 @@
-import { ConflictException, Injectable } from "@nestjs/common";
+import { recordChange } from "../../audit/infrastructure/record-change";
+import { invitationChange } from "../domain/invitation.events";
+import { identityChange } from "../../identity/domain/identity.events";
+import { requirePatientInvitation } from "../../patients/infrastructure/patient-invitation";
+import { linkPatientAccount } from "../../patients/infrastructure/patient-account-link";
+import type { AccessActor } from "../../authorization/domain/access-policy";
+import { ConflictException, ForbiddenException, Injectable } from "@nestjs/common";
 import { InjectModel } from "@nestjs/sequelize";
 import { Sequelize } from "sequelize-typescript";
 import { Op } from "sequelize";
@@ -38,9 +44,15 @@ export class SequelizeInvitationRepository extends InvitationRepository {
   /**
    * Creates the resource using the supplied input.
    * @param invitation Value required by this operation.
+   * @param actor Authenticated caller and current effective grants.
    */
-  async create(invitation: Invitation) {
+  async create(invitation: Invitation, actor?: AccessActor) {
     await this.db.transaction(async transaction => {
+      if (actor) await this.authorization.assertAssignable(invitation.props.roles, actor, transaction);
+      if (invitation.props.patientId) {
+        if (!actor) throw new ForbiddenException("Patient invitation requires an authenticated actor");
+        await requirePatientInvitation(this.db, transaction, invitation.props.patientId, invitation.props.email, actor);
+      }
       await this.db.query("SELECT pg_advisory_xact_lock(hashtext(:email))", {
         replacements: { email: invitation.props.email },
         transaction
@@ -57,6 +69,11 @@ export class SequelizeInvitationRepository extends InvitationRepository {
         { where: { email: invitation.props.email, status: "pending" }, transaction }
       );
       await this.model.create({ id: invitation.id, ...invitation.props }, { transaction });
+      await recordChange(
+        this.db,
+        transaction,
+        invitationChange("invitation.created", invitation.id, actor?.id, null, invitation.props)
+      );
     });
   }
   /**
@@ -97,9 +114,10 @@ export class SequelizeInvitationRepository extends InvitationRepository {
    * @param id Resource identifier.
    * @param hash Stored token or password digest.
    * @param expiresAt Value required by this operation.
+   * @param actor Authenticated caller and current effective grants.
    * @returns Result of the completed operation.
    */
-  async rotate(id: string, hash: string, expiresAt: Date) {
+  async rotate(id: string, hash: string, expiresAt: Date, actor?: AccessActor) {
     return this.db.transaction(async transaction => {
       const row = await this.model.findByPk(id, { transaction, lock: transaction.LOCK.UPDATE });
       if (
@@ -108,9 +126,20 @@ export class SequelizeInvitationRepository extends InvitationRepository {
         (row.lastSendAttemptAt && Date.now() - row.lastSendAttemptAt.getTime() < 60000)
       )
         return false;
+      if (actor) await this.authorization.assertAssignable(row.roles, actor, transaction);
+      if (row.patientId) {
+        if (!actor) throw new ForbiddenException("Patient invitation requires an authenticated actor");
+        await requirePatientInvitation(this.db, transaction, row.patientId, row.email, actor);
+      }
+      const before = row.get({ plain: true });
       await row.update(
         { tokenHash: hash, expiresAt, status: "pending", deliveryStatus: "pending", lastSendAttemptAt: new Date() },
         { transaction }
+      );
+      await recordChange(
+        this.db,
+        transaction,
+        invitationChange("invitation.resent", id, actor?.id, before, row.get({ plain: true }))
       );
       return true;
     });
@@ -143,7 +172,26 @@ export class SequelizeInvitationRepository extends InvitationRepository {
       });
       if (await UserModel.findOne({ where: { email: row.email }, transaction }))
         throw new ConflictException("Email already registered");
+      if (!row.invitedBy && (row.invitedByName || row.invitedByEmail))
+        throw new ForbiddenException("Inviter no longer exists; issue a new invitation");
+      if (row.invitedBy)
+        await this.authorization.assertAssignable(
+          row.roles,
+          await this.authorization.actorFor(row.invitedBy, transaction),
+          transaction
+        );
+      const before = row.get({ plain: true });
       const id = randomUUID();
+      if (row.patientId) {
+        if (!row.invitedBy) throw new ForbiddenException("Patient invitation requires a current inviter");
+        await requirePatientInvitation(
+          this.db,
+          transaction,
+          row.patientId,
+          row.email,
+          await this.authorization.actorFor(row.invitedBy, transaction)
+        );
+      }
       await UserModel.create(
         {
           id,
@@ -158,17 +206,48 @@ export class SequelizeInvitationRepository extends InvitationRepository {
         { transaction }
       );
       await this.authorization.setRoles(id, row.roles, transaction);
+      if (row.patientId) await linkPatientAccount(this.db, transaction, row.patientId, id, id);
       await row.update({ status: "accepted", acceptedAt: new Date(), acceptedUserId: id }, { transaction });
+      await recordChange(
+        this.db,
+        transaction,
+        invitationChange("invitation.accepted", row.id, id, before, row.get({ plain: true }))
+      );
+      await recordChange(
+        this.db,
+        transaction,
+        identityChange("user.activated", id, id, null, {
+          id,
+          email: row.email,
+          firstName: row.firstName,
+          lastName: row.lastName,
+          name: (row.firstName + " " + row.lastName).trim(),
+          enabled: true,
+          verified: true,
+          roles: row.roles
+        })
+      );
       return true;
     });
   }
   /**
    * Marks the matching session as revoked.
    * @param id Resource identifier.
+   * @param actor Authenticated caller and effective grants.
    * @returns Result of the completed operation.
    */
-  async revoke(id: string) {
-    const [count] = await this.model.update({ status: "revoked" }, { where: { id, status: ["pending", "expired"] } });
-    return count > 0;
+  async revoke(id: string, actor?: AccessActor) {
+    return this.db.transaction(async transaction => {
+      const row = await this.model.findByPk(id, { transaction, lock: transaction.LOCK.UPDATE });
+      if (!row || !["pending", "expired"].includes(row.status)) return false;
+      const before = row.get({ plain: true });
+      await row.update({ status: "revoked" }, { transaction });
+      await recordChange(
+        this.db,
+        transaction,
+        invitationChange("invitation.revoked", id, actor?.id, before, row.get({ plain: true }))
+      );
+      return true;
+    });
   }
 }

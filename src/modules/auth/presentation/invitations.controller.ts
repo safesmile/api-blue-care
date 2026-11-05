@@ -1,3 +1,4 @@
+import { AuditReasonDto } from "../../../shared/presentation/audit-reason.dto";
 import { Body, Controller, Get, Header, HttpCode, Param, ParseUUIDPipe, Post, Query, Req } from "@nestjs/common";
 import { Throttle } from "@nestjs/throttler";
 import { InvitationsUseCase } from "../application/invitations.usecase";
@@ -63,23 +64,30 @@ export class InvitationsController {
    * Rotates an invitation token before delivering a new link.
    * @param id Resource identifier.
    * @param request HTTP request containing the authenticated profile.
+   * @param _input Validated optional audit reason.
    * @returns Result of the completed operation.
    */
   @Post(":id/resend")
   @HttpCode(200)
   @Permissions(AUTH_PERMISSIONS.resendInvitation.shortcode, "roles:assign")
   @Throttle({ default: { limit: 5, ttl: 60000 } })
-  resend(@Param("id", ParseUUIDPipe) id: string, @Req() request: AuthRequest) {
+  resend(@Param("id", ParseUUIDPipe) id: string, @Req() request: AuthRequest, @Body() _input: AuditReasonDto = {}) {
+    void _input; // Validation prevents arbitrary request metadata from being captured.
     return this.invitations.resend(id, request.user);
   }
   /**
    * Revokes the invitation without removing its audit history.
    * @param id Resource identifier.
+   * @param request HTTP request carrying the verified identity.
+   * @param _input Validated optional audit reason.
    * @returns Result of the completed operation.
    */
   @Post(":id/revoke") @HttpCode(204) @Permissions(AUTH_PERMISSIONS.revokeInvitation.shortcode) revoke(
-    @Param("id", ParseUUIDPipe) id: string
+    @Param("id", ParseUUIDPipe) id: string,
+    @Req() request: AuthRequest,
+    @Body() _input: AuditReasonDto = {}
   ) {
-    return this.invitations.revoke(id);
+    void _input;
+    return this.invitations.revoke(id, request.user);
   }
 }

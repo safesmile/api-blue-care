@@ -1,6 +1,10 @@
-import { Injectable, ConflictException } from "@nestjs/common";
+import { recordChange } from "../../audit/infrastructure/record-change";
+import { identityChange } from "../domain/identity.events";
+import { clinicChange } from "../../clinics/domain/clinic.events";
+import { AccessPolicy, type AccessActor } from "../../authorization/domain/access-policy";
+import { Injectable, ConflictException, ForbiddenException } from "@nestjs/common";
 import { InjectModel } from "@nestjs/sequelize";
-import { UniqueConstraintError } from "sequelize";
+import { UniqueConstraintError, QueryTypes } from "sequelize";
 import { IdentityRepository } from "../domain/identity.repository";
 import { Sequelize } from "sequelize-typescript";
 import { AuthorizationStore } from "../../authorization/infrastructure/authorization.store";
@@ -50,15 +54,24 @@ export class SequelizeIdentityRepository extends IdentityRepository {
   /**
    * Creates the resource using the supplied input.
    * @param user Domain user to persist.
+   * @param actor Authenticated caller and current effective grants.
    * @returns Result of the completed operation.
    */
-  async create(user: User) {
+  async create(user: User, actor?: AccessActor) {
     try {
       await this.db.transaction(async transaction => {
+        if (actor) await this.authorization.assertAssignable(user.props.roles, actor, transaction);
         const { roles, email, name, passwordHash, enabled, firstName, lastName, verified } = user.props;
-        const props = { email, name, passwordHash, enabled, firstName, lastName, verified };
-        await this.model.create({ id: user.id, ...props }, { transaction });
+        await this.model.create(
+          { id: user.id, email, name, passwordHash, enabled, firstName, lastName, verified },
+          { transaction }
+        );
         await this.authorization.setRoles(user.id, roles, transaction);
+        await recordChange(
+          this.db,
+          transaction,
+          identityChange("user.created", user.id, actor?.id, null, { id: user.id, ...user.props })
+        );
       });
       return (await this.read(user.id))!;
     } catch (error) {
@@ -102,24 +115,79 @@ export class SequelizeIdentityRepository extends IdentityRepository {
   /**
    * Updates the permitted resource properties.
    * @param user Domain user to persist.
+   * @param actor Authenticated caller and current effective grants.
+   * @param assignRoles Whether this update explicitly replaces role assignments.
    * @returns Result of the completed operation.
    */
-  async update(user: User) {
+  async update(user: User, actor?: AccessActor, assignRoles = false) {
     await this.db.transaction(async transaction => {
-      const { roles, email, name, passwordHash, enabled, firstName, lastName, verified } = user.props;
-      await this.model.update(
-        { email, name, passwordHash, enabled, firstName, lastName, verified },
-        { where: { id: user.id }, transaction }
+      const current = await this.model.findByPk(user.id, { transaction, lock: transaction.LOCK.UPDATE });
+      if (!current) throw new ConflictException("User no longer exists");
+      const before = {
+        ...current.get({ plain: true }),
+        roles: await this.authorization.rolesFor(user.id, transaction)
+      };
+      if (!AccessPolicy.protectedAccount(actor, await this.authorization.rolesFor(user.id, transaction)))
+        throw new ForbiddenException("Only superadmin may modify superadmin accounts");
+      if (assignRoles && actor) await this.authorization.assertAssignable(user.props.roles, actor, transaction);
+      const { roles, name, enabled, firstName, lastName } = user.props;
+      await this.model.update({ name, enabled, firstName, lastName }, { where: { id: user.id }, transaction });
+      if (assignRoles) await this.authorization.setRoles(user.id, roles, transaction);
+      await recordChange(
+        this.db,
+        transaction,
+        identityChange("user.updated", user.id, actor?.id, before, {
+          ...before,
+          name,
+          enabled,
+          firstName,
+          lastName,
+          roles: assignRoles ? roles : before.roles
+        })
       );
-      await this.authorization.setRoles(user.id, roles, transaction);
     });
     return (await this.read(user.id))!;
   }
   /**
    * Deletes the resource identified by its ID.
    * @param id Resource identifier.
+   * @param actor Authenticated caller and current effective grants.
    */
-  async delete(id: string) {
-    await this.model.destroy({ where: { id } });
+  async delete(id: string, actor?: AccessActor) {
+    await this.db.transaction(async transaction => {
+      const current = await this.model.findByPk(id, { transaction, lock: transaction.LOCK.UPDATE });
+      if (!current) return;
+      const [linkedPatient] = await this.db.query<{ id: string }>('SELECT id FROM patients WHERE "userId"=:id', {
+        replacements: { id },
+        transaction,
+        type: QueryTypes.SELECT
+      });
+      if (linkedPatient) throw new ConflictException("Account has a linked patient; deactivate the account instead");
+      if (!AccessPolicy.protectedAccount(actor, await this.authorization.rolesFor(id, transaction)))
+        throw new ForbiddenException("Only superadmin may modify superadmin accounts");
+      await recordChange(
+        this.db,
+        transaction,
+        identityChange(
+          "user.deleted",
+          id,
+          actor?.id,
+          { ...current.get({ plain: true }), roles: await this.authorization.rolesFor(id, transaction) },
+          null
+        )
+      );
+      // Assignment removals are recorded before this transaction commits the account cascade.
+      const assignments = await this.db.query<{ clinicId: string; userId: string }>(
+        'SELECT "clinicId","userId" FROM clinic_staff WHERE "userId"=:id ORDER BY "clinicId"',
+        { replacements: { id }, transaction, type: QueryTypes.SELECT }
+      );
+      for (const assignment of assignments)
+        await recordChange(
+          this.db,
+          transaction,
+          clinicChange("clinic.staff-unassigned", assignment.clinicId, actor?.id, assignment, null)
+        );
+      await this.model.destroy({ where: { id }, transaction });
+    });
   }
 }

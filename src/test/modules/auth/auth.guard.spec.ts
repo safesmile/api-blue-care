@@ -73,46 +73,17 @@ describe("AuthGuard role authorization", () => {
     own.request.params.id = userFixture().id;
     expect(await guard.canActivate(own.value)).toBe(true);
   });
-  it("requires roles:assign and reserves superadmin assignment", async () => {
-    const user = userFixture();
-    user.props.roles = ["admin"];
-    user.props.permissions.push("users:create");
-    dependencies.users.read.mockResolvedValue(user);
-    await expect(guard.canActivate(context("users:create", { roles: ["customer"] }).value)).rejects.toBeInstanceOf(
-      ForbiddenException
-    );
-    user.props.permissions.push("roles:assign");
-    await expect(guard.canActivate(context("users:create", { roles: ["superadmin"] }).value)).rejects.toBeInstanceOf(
-      ForbiddenException
-    );
-    expect(await guard.canActivate(context("users:create", { roles: ["customer"] }).value)).toBe(true);
-  });
-  it("prevents a non-superadmin from modifying superadmin accounts", async () => {
+  it("leaves resource and delegation decisions to application policies", async () => {
     const actor = userFixture();
-    actor.props.roles = ["admin"];
-    actor.props.permissions.push("users:update");
-    const target = userFixture();
-    target.props.roles = ["superadmin"];
-    dependencies.users.read.mockResolvedValueOnce(actor).mockResolvedValueOnce(target);
-    await expect(guard.canActivate(context("users:update").value)).rejects.toBeInstanceOf(ForbiddenException);
-  });
-  it("permits superadmin role assignment with its catalog grants", async () => {
-    const actor = userFixture();
-    actor.props.roles = ["superadmin"];
-    actor.props.permissions.push("roles:assign", "users:create");
+    actor.props.permissions.push("users:create");
     dependencies.users.read.mockResolvedValue(actor);
     expect(await guard.canActivate(context("users:create", { roles: ["superadmin"] }).value)).toBe(true);
+    expect(dependencies.users.read).toHaveBeenCalledTimes(1);
   });
-  it("requires ownership even when a customer has a user-read permission", async () => {
-    const customer = userFixture();
-    dependencies.users.read.mockResolvedValue(customer);
-    const other = context("users:read");
-    other.request.params.id = "another-account";
-    await expect(guard.canActivate(other.value)).rejects.toBeInstanceOf(ForbiddenException);
-    const own = context("users:read");
-    own.request.params.id = customer.id;
-    expect(await guard.canActivate(own.value)).toBe(true);
-    customer.props.verified = false;
-    await expect(guard.canActivate(own.value)).rejects.toBeInstanceOf(UnauthorizedException);
+  it("rejects unverified accounts", async () => {
+    const actor = userFixture();
+    actor.props.verified = false;
+    dependencies.users.read.mockResolvedValue(actor);
+    await expect(guard.canActivate(context().value)).rejects.toBeInstanceOf(UnauthorizedException);
   });
 });

@@ -1,3 +1,4 @@
+import { SmtpEmailSender } from "../../../infrastructure/email/smtp-email-sender";
 import { ConfigService } from "@nestjs/config";
 import { ServiceUnavailableException } from "@nestjs/common";
 import { createTransport } from "nodemailer";
@@ -20,7 +21,7 @@ describe("SMTP account links", () => {
     ["activate", "/activate-account"],
     ["email-change", "/confirm-email"]
   ] as const)("sends a %s link containing a readable URL token", async (kind, path) => {
-    const mail = new SmtpAccountMailer(new ConfigService(settings));
+    const mail = createMailer(new ConfigService(settings));
     await mail.send("invited@blue.test", kind, "a".repeat(80), {
       firstName: "Ana",
       lastName: "López",
@@ -29,11 +30,15 @@ describe("SMTP account links", () => {
     });
     const message = sendMail.mock.calls[0][0];
     expect(message.to).toBe("invited@blue.test");
+    expect(message.html).toContain('role="presentation"');
+    expect(message.html).toContain('href="http://localhost:5173' + path + "?token=" + "a".repeat(80) + '"');
+    expect(message.html).toContain("Blue Care");
+    expect(message).not.toHaveProperty("content");
     expect(message.text).toContain(path + "?token=" + "a".repeat(80));
     expect(message.text).toContain("Ana López");
   });
   it("uses SMTP authentication and implicit TLS when configured", async () => {
-    const mail = new SmtpAccountMailer(
+    const mail = createMailer(
       new ConfigService({ ...settings, SMTP_PORT: 465, SMTP_USER: "user", SMTP_PASSWORD: "secret" })
     );
     await mail.send("a@blue.test", "reset", "token");
@@ -42,8 +47,17 @@ describe("SMTP account links", () => {
     );
   });
   it("rejects unavailable SMTP configuration", async () => {
-    await expect(
-      new SmtpAccountMailer(new ConfigService({})).send("a@blue.test", "reset", "token")
-    ).rejects.toBeInstanceOf(ServiceUnavailableException);
+    await expect(createMailer(new ConfigService({})).send("a@blue.test", "reset", "token")).rejects.toBeInstanceOf(
+      ServiceUnavailableException
+    );
   });
 });
+
+/**
+ * Creates the account adapter using the same shared transport as the application.
+ * @param config Validated transport configuration.
+ * @returns Account mail adapter.
+ */
+function createMailer(config: ConfigService) {
+  return new SmtpAccountMailer(config, new SmtpEmailSender(config));
+}

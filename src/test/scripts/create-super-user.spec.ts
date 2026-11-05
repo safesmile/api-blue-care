@@ -1,4 +1,4 @@
-import { collectSuperUserInput, validateSuperUserInput } from "../../../scripts/lib/super-user.cjs";
+import { collectSuperUserInput, validateSuperUserInput } from "../../../scripts/lib/super-user";
 describe("createSuperUser console input", () => {
   it("normalizes names and email and requests a hidden password twice", async () => {
     const io = {

@@ -1,3 +1,12 @@
+import { PreventionModule } from "./modules/prevention/prevention.module";
+import { DashboardModule } from "./modules/dashboard/dashboard.module";
+import { AuditModule } from "./modules/audit/audit.module";
+import { BenefitsModule } from "./modules/benefits/benefits.module";
+import { PlansModule } from "./modules/plans/plans.module";
+import { MembershipsModule } from "./modules/memberships/memberships.module";
+import { ClinicsModule } from "./modules/clinics/clinics.module";
+import { PatientsModule } from "./modules/patients/patients.module";
+import { NotificationsModule } from "./modules/notifications/notifications.module";
 import { Module } from "@nestjs/common";
 import { APP_GUARD } from "@nestjs/core";
 import { ConfigModule, ConfigService } from "@nestjs/config";
@@ -32,7 +41,16 @@ import { AppController } from "./app.controller";
     ThrottlerModule.forRoot([{ ttl: 60000, limit: 60 }]),
     IdentityModule,
     AuthModule,
-    StorageModule
+    StorageModule,
+    NotificationsModule,
+    AuditModule,
+    ClinicsModule,
+    PatientsModule,
+    PlansModule,
+    MembershipsModule,
+    BenefitsModule,
+    PreventionModule,
+    DashboardModule
   ],
   controllers: [AppController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }]

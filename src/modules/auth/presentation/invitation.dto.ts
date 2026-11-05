@@ -1,33 +1,42 @@
+import { AuditReasonDto } from "../../../shared/presentation/audit-reason.dto";
 import { Transform } from "class-transformer";
 import {
   ArrayMinSize,
   ArrayUnique,
   IsArray,
   IsEmail,
-  IsIn,
   IsString,
+  IsUUID,
+  ValidateIf,
   Length,
   Matches,
   MaxLength
 } from "class-validator";
-import { ROLE_NAMES, type RoleName } from "../../../permissions";
+import { type RoleName } from "../../../permissions";
 /**
  * Defines and validates the HTTP input fields.
  */
-export class CreateInvitationDto {
+export class CreateInvitationDto extends AuditReasonDto {
+  @ValidateIf((_o, value) => value !== undefined) @IsUUID() patientId?: string;
   @Transform(({ value }: { value: unknown }) => (typeof value === "string" ? value.trim().toLowerCase() : value))
   @IsEmail()
   @MaxLength(254)
   email!: string;
   @Transform(({ value }: { value: unknown }) => (typeof value === "string" ? value.trim() : value))
   @IsString()
-  @Length(1, 59)
+  @Length(1, 60)
   firstName!: string;
   @Transform(({ value }: { value: unknown }) => (typeof value === "string" ? value.trim() : value))
   @IsString()
   @Length(1, 60)
   lastName!: string;
-  @IsArray() @ArrayMinSize(1) @ArrayUnique() @IsIn(ROLE_NAMES, { each: true }) roles!: RoleName[];
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayUnique()
+  @IsString({ each: true })
+  @MaxLength(60, { each: true })
+  @Matches(/^[a-z][a-z0-9-]{1,59}$/, { each: true })
+  roles!: RoleName[];
 }
 /**
  * Defines and validates the HTTP input fields.

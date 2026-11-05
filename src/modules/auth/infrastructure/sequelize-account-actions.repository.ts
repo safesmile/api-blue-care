@@ -1,4 +1,6 @@
-import { ROLE_NAMES } from "../../../permissions";
+import { recordChange } from "../../audit/infrastructure/record-change";
+import { syncPatientContact } from "../../patients/infrastructure/sync-patient-contact";
+import { identityChange } from "../../identity/domain/identity.events";
 import { ConflictException, Injectable } from "@nestjs/common";
 import { InjectModel } from "@nestjs/sequelize";
 import { Sequelize } from "sequelize-typescript";
@@ -59,15 +61,18 @@ export class SequelizeAccountActionsRepository extends AccountActionsRepository 
       )
         return false;
       if (kind === "activate") {
-        if (
-          user.verified ||
-          !(await this.authorization.rolesFor(user.id, transaction)).some(role =>
-            ROLE_NAMES.some(allowed => allowed === role)
-          )
-        )
-          return false;
+        if (user.verified || !(await this.authorization.rolesFor(user.id, transaction)).length) return false;
       } else if (!user.verified) return false;
+      const before = { ...user.get({ plain: true }), roles: await this.authorization.rolesFor(user.id, transaction) };
       await user.update({ passwordHash, verified: true }, { transaction });
+      await recordChange(
+        this.db,
+        transaction,
+        identityChange(kind === "activate" ? "user.activated" : "user.password-reset", user.id, user.id, before, {
+          ...before,
+          verified: true
+        })
+      );
       await SessionModel.update({ revoked: true }, { where: { userId: user.id }, transaction });
       await this.actions.destroy({ where: { email: user.email }, transaction });
       return true;
@@ -84,7 +89,13 @@ export class SequelizeAccountActionsRepository extends AccountActionsRepository 
     return this.db.transaction(async transaction => {
       const user = await UserModel.findByPk(userId, { transaction, lock: transaction.LOCK.UPDATE });
       if (!user?.enabled || !user.verified || user.passwordHash !== expectedHash) return false;
+      const snapshot = { ...user.get({ plain: true }), roles: await this.authorization.rolesFor(user.id, transaction) };
       await user.update({ passwordHash }, { transaction });
+      await recordChange(
+        this.db,
+        transaction,
+        identityChange("user.password-changed", user.id, user.id, snapshot, snapshot)
+      );
       await SessionModel.update({ revoked: true }, { where: { userId }, transaction });
       await this.actions.destroy({ where: { email: user.email }, transaction });
       return true;
@@ -112,7 +123,18 @@ export class SequelizeAccountActionsRepository extends AccountActionsRepository 
           user.email !== action.email
         )
           return false;
+        const before = { ...user.get({ plain: true }), roles: await this.authorization.rolesFor(user.id, transaction) };
         await user.update({ email: action.targetEmail, verified: true }, { transaction });
+        await syncPatientContact(this.db, transaction, user.id, action.targetEmail);
+        await recordChange(
+          this.db,
+          transaction,
+          identityChange("user.email-changed", user.id, user.id, before, {
+            ...before,
+            email: action.targetEmail,
+            verified: true
+          })
+        );
         await SessionModel.update({ revoked: true }, { where: { userId: user.id }, transaction });
         await this.actions.destroy({ where: { email: action.email }, transaction });
         return true;

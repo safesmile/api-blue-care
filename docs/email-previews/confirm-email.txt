@@ -1,0 +1,7 @@
+Confirma tu nuevo correo
+
+Recibimos una solicitud para utilizar esta dirección como el nuevo correo de tu cuenta. Confírmala con el siguiente botón.
+
+Confirmar mi correo: https://blue-care.example/confirm-email?token=vista-previa-sin-validez
+
+Este enlace es de un solo uso y vence en 30 minutos. Tu dirección actual se conservará hasta que confirmes el cambio. Si no lo solicitaste, ignora este correo.

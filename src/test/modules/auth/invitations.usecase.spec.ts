@@ -1,3 +1,4 @@
+import type { RolesRepository } from "../../../modules/authorization/domain/roles.repository";
 import {
   ConflictException,
   ForbiddenException,
@@ -57,7 +58,9 @@ describe("InvitationsUseCase", () => {
     };
     mail = { send: jest.fn() };
     passwords = identityFixture().passwords;
-    useCase = new InvitationsUseCase(repository, mail, passwords);
+    useCase = new InvitationsUseCase(repository, mail, passwords, {
+      authorizeAssignment: jest.fn()
+    } as unknown as RolesRepository);
   });
   it("records names, inviter, state and lifetime, while emailing the raw credential", async () => {
     const view = await useCase.create(input, actor);
@@ -112,7 +115,7 @@ describe("InvitationsUseCase", () => {
   it("resends with a rotated credential and new validity", async () => {
     repository.rotate.mockResolvedValue(true);
     await useCase.resend(invitation.id, actor);
-    expect(repository.rotate).toHaveBeenCalledWith(invitation.id, expect.any(String), expect.any(Date));
+    expect(repository.rotate).toHaveBeenCalledWith(invitation.id, expect.any(String), expect.any(Date), actor);
     expect(mail.send).toHaveBeenCalled();
   });
   it("rejects resends within cooldown or after closure", async () => {
@@ -122,8 +125,8 @@ describe("InvitationsUseCase", () => {
   });
   it("revokes pending invitations", async () => {
     repository.revoke.mockResolvedValue(true);
-    await useCase.revoke(invitation.id);
-    expect(repository.revoke).toHaveBeenCalledWith(invitation.id);
+    await useCase.revoke(invitation.id, actor);
+    expect(repository.revoke).toHaveBeenCalledWith(invitation.id, actor);
   });
   it("rejects missing invitations and closed revocations", async () => {
     repository.read.mockResolvedValueOnce(null);
@@ -146,5 +149,10 @@ describe("InvitationsUseCase", () => {
     repository.create.mockRejectedValue(new ConflictException());
     await expect(useCase.create(input, actor)).rejects.toBeInstanceOf(ConflictException);
     expect(mail.send).not.toHaveBeenCalled();
+  });
+  it("rejects a name that exceeds the combined storage limit", async () => {
+    await expect(
+      useCase.create({ ...input, firstName: "a".repeat(60), lastName: "b".repeat(60) }, actor)
+    ).rejects.toThrow("Invalid combined name");
   });
 });

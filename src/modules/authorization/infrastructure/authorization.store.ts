@@ -1,4 +1,5 @@
-import { Injectable, BadRequestException } from "@nestjs/common";
+import { Injectable, BadRequestException, ForbiddenException } from "@nestjs/common";
+import { AccessPolicy, type AccessActor } from "../domain/access-policy";
 import { Sequelize } from "sequelize-typescript";
 import { QueryTypes, type Transaction } from "sequelize";
 import type { Permission } from "../../../shared/domain/permission";
@@ -7,6 +8,45 @@ import type { Permission } from "../../../shared/domain/permission";
  */
 @Injectable()
 export class AuthorizationStore {
+  /**
+   * Checks role existence and delegation while locking definitions against concurrent edits.
+   * @param names Requested role names.
+   * @param actor Authenticated caller and current effective grants.
+   * @param transaction Current database transaction.
+   * @returns Result of the completed operation.
+   */
+  async assertAssignable(names: string[], actor: AccessActor, transaction: Transaction): Promise<void> {
+    if (!AccessPolicy.allows(actor, "roles:assign"))
+      throw new ForbiddenException("Role assignment requires roles:assign");
+    const unique = [...new Set(names)];
+    if (unique.some(name => name.startsWith("legacy-")))
+      throw new BadRequestException("Legacy roles cannot be newly assigned");
+    if (unique.includes("superadmin") && !actor.roles.includes("superadmin"))
+      throw new ForbiddenException("Only superadmin may grant superadmin");
+    if (!unique.length) return;
+    const rows = await this.db.query<{ name: string }>(
+      "SELECT name FROM roles WHERE name IN (:names) ORDER BY name FOR SHARE",
+      { replacements: { names: unique }, transaction, type: QueryTypes.SELECT }
+    );
+    if (rows.length !== unique.length) throw new BadRequestException("Unknown role");
+    if (!AccessPolicy.delegates(actor, await this.permissionsFor(unique, transaction)))
+      throw new ForbiddenException("Cannot assign roles exceeding your own permissions");
+  }
+  /**
+   * Resolves the current verified inviter before redeeming mutable custom role grants.
+   * @param id Resource identifier.
+   * @param transaction Current database transaction.
+   * @returns Result of the completed operation.
+   */
+  async actorFor(id: string, transaction: Transaction): Promise<AccessActor> {
+    const [user] = await this.db.query<{ id: string }>(
+      "SELECT id FROM users WHERE id = :id AND enabled = true AND verified = true",
+      { replacements: { id }, transaction, type: QueryTypes.SELECT }
+    );
+    if (!user) throw new ForbiddenException("Inviter is no longer eligible");
+    const roles = await this.rolesFor(id, transaction);
+    return { id, roles, permissions: await this.permissionsFor(roles, transaction) };
+  }
   /**
    * Receives the database connection.
    * @param db PostgreSQL connection.

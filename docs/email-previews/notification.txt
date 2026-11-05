@@ -1,0 +1,5 @@
+Recordatorio Blue Care
+
+Tienes un evento preventivo próximo. Consulta la fecha y los detalles en Blue Care.
+
+Abrir Blue Care: https://blue-care.example

@@ -1,12 +1,14 @@
 import { type RoleName } from "../../../permissions";
 export interface CreateUserInput {
   email: string;
-  name: string;
+  firstName: string;
+  lastName: string;
   password: string;
   roles: RoleName[];
 }
 export interface UpdateUserInput {
-  name?: string;
+  firstName?: string;
+  lastName?: string;
   enabled?: boolean;
   roles?: RoleName[];
 }

@@ -5,6 +5,15 @@
     "test",
     "dist",
     "**/*spec.ts",
-    "src/test"
+    "src/test",
+    "scripts",
+    "database"
+  ],
+  "compilerOptions": {
+    "rootDir": "./src",
+    "tsBuildInfoFile": "./dist/tsconfig.build.tsbuildinfo"
+  },
+  "include": [
+    "src/**/*.ts"
   ]
 }

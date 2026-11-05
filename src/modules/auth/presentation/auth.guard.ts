@@ -53,33 +53,8 @@ export class AuthGuard implements CanActivate {
     const user = await this.users.read(sub);
     if (!user?.props.enabled || !user.props.verified) throw new UnauthorizedException();
     request.user = user.toView();
-    const requestedRoles: unknown = request.body?.roles;
-    if (
-      Array.isArray(requestedRoles) &&
-      requestedRoles.includes("superadmin") &&
-      !user.props.roles.includes("superadmin")
-    )
-      throw new ForbiddenException("Only superadmin may grant superadmin");
     const required = this.reflector.getAllAndOverride<Permission[]>("permissions", targets) ?? [];
     if (!required.length) throw new ForbiddenException("Missing route permission policy");
-    const isCustomerOnly =
-      user.props.roles.includes("customer") &&
-      !user.props.roles.some(role => role === "admin" || role === "superadmin");
-    if (isCustomerOnly && required.some(permission => permission.startsWith("users:")) && request.params.id !== user.id)
-      throw new ForbiddenException("A customer can access only their own identity");
-    if (requestedRoles !== undefined && !user.props.permissions.includes("roles:assign"))
-      throw new ForbiddenException("Role assignment requires roles:assign");
-    if (
-      !user.props.roles.includes("superadmin") &&
-      (required.includes("users:update") || required.includes("users:delete"))
-    ) {
-      const targetId = request.params.id;
-      if (typeof targetId === "string") {
-        const target = await this.users.read(targetId);
-        if (target?.props.roles.includes("superadmin"))
-          throw new ForbiddenException("Only superadmin may modify superadmin accounts");
-      }
-    }
     if (!required.every(p => user.props.permissions.includes(p))) throw new ForbiddenException();
     return true;
   }

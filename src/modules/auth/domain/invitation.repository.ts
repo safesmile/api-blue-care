@@ -1,3 +1,4 @@
+import type { AccessActor } from "../../authorization/domain/access-policy";
 import type { Invitation } from "./invitation.entity";
 import type { Page, Pagination } from "../../../shared/domain/crud.repository";
 /**
@@ -8,7 +9,7 @@ export abstract class InvitationRepository {
    * Creates the resource using the supplied input.
    * @param invitation Value required by this operation.
    */
-  abstract create(invitation: Invitation): Promise<void>;
+  abstract create(invitation: Invitation, actor?: AccessActor): Promise<void>;
   /**
    * Returns the resource identified by its ID.
    * @param id Resource identifier.
@@ -30,7 +31,7 @@ export abstract class InvitationRepository {
    * @param hash Stored token or password digest.
    * @param expiresAt Value required by this operation.
    */
-  abstract rotate(id: string, hash: string, expiresAt: Date): Promise<boolean>;
+  abstract rotate(id: string, hash: string, expiresAt: Date, actor?: AccessActor): Promise<boolean>;
   /**
    * Records the result of a specific token delivery attempt.
    * @param id Resource identifier.
@@ -48,5 +49,5 @@ export abstract class InvitationRepository {
    * Marks the matching session as revoked.
    * @param id Resource identifier.
    */
-  abstract revoke(id: string): Promise<boolean>;
+  abstract revoke(id: string, actor?: AccessActor): Promise<boolean>;
 }

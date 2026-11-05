@@ -7,31 +7,40 @@
   "license": "UNLICENSED",
   "scripts": {
     "build": "nest build",
-    "format": "prettier --write \"{src,scripts,database}/**/*.{ts,cjs,json}\" eslint.config.mjs .prettierrc docker/docker-compose.yaml",
+    "format": "prettier --write \"{src,scripts,database}/**/*.{ts,json}\" eslint.config.mjs .prettierrc docker/docker-compose.yaml",
     "start": "nest start",
     "start:dev": "nest start --watch",
     "start:debug": "nest start --debug --watch",
     "start:prod": "node dist/main",
-    "lint": "eslint \"{src,scripts,database}/**/*.{ts,cjs}\" eslint.config.mjs --fix",
+    "lint": "eslint \"{src,scripts,database}/**/*.ts\" eslint.config.mjs --fix",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:e2e": "npm run test:integration",
-    "db:migrate": "sequelize-cli db:migrate",
-    "db:migrate:undo": "sequelize-cli db:migrate:undo",
-    "lint:check": "eslint \"{src,scripts,database}/**/*.{ts,cjs}\" eslint.config.mjs",
-    "test:integration": "node scripts/test-integration.cjs",
-    "format:check": "prettier --check \"{src,scripts,database}/**/*.{ts,cjs,json}\" eslint.config.mjs .prettierrc docker/docker-compose.yaml",
+    "db:migrate": "ts-node scripts/database.ts db:migrate",
+    "db:migrate:undo": "ts-node scripts/database.ts db:migrate:undo",
+    "lint:check": "eslint \"{src,scripts,database}/**/*.ts\" eslint.config.mjs",
+    "test:integration": "ts-node scripts/test-integration.ts",
+    "format:check": "prettier --check \"{src,scripts,database}/**/*.{ts,json}\" eslint.config.mjs .prettierrc docker/docker-compose.yaml",
     "test:typecheck": "tsc --noEmit --incremental false",
-    "permissions": "node scripts/update-permissions.cjs",
-    "createSuperUser": "node scripts/createSuperUser.cjs",
-    "db:migrate:reset": "sequelize-cli db:migrate:undo:all && npm run db:migrate && npm run db:seed",
-    "db:seed": "sequelize-cli db:seed:all"
+    "permissions": "ts-node scripts/update-permissions.ts",
+    "createSuperUser": "ts-node scripts/createSuperUser.ts",
+    "db:migrate:reset": "ts-node scripts/database.ts db:migrate:undo:all && npm run db:migrate && npm run db:seed",
+    "db:seed": "ts-node scripts/database.ts db:seed:all",
+    "emails:preview": "ts-node scripts/preview-emails.ts",
+    "prevention:drain": "ts-node scripts/prevention-drain.ts",
+    "memberships:drain": "ts-node scripts/memberships-drain.ts",
+    "notifications:drain": "ts-node scripts/notifications-drain.ts",
+    "gcp:scheduler:sync": "ts-node scripts/sync-cloud-scheduler.ts",
+    "gcp:queue:ensure": "ts-node scripts/ensure-cloud-queue.ts",
+    "admin:create": "ts-node scripts/create-admin.ts"
   },
   "dependencies": {
+    "@google-cloud/scheduler": "^6.2.0",
     "@google-cloud/secret-manager": "^7.2.0",
     "@google-cloud/storage": "^8.4.0",
+    "@google-cloud/tasks": "^7.3.1",
     "@nestjs/common": "^11.0.1",
     "@nestjs/config": "^4.0.4",
     "@nestjs/core": "^11.0.1",
@@ -43,6 +52,7 @@
     "class-transformer": "^0.5.1",
     "class-validator": "^0.15.1",
     "dotenv": "^18.0.9",
+    "google-auth-library": "^11.3.3",
     "nodemailer": "^10.2.1",
     "pg": "^8.23.1",
     "pg-hstore": "^2.3.4",
@@ -114,5 +124,8 @@
     "@nestjs/platform-express": {
       "multer": "^2.5.0"
     }
+  },
+  "engines": {
+    "node": ">=22"
   }
 }

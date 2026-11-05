@@ -9,7 +9,7 @@ describe("UsersController", () => {
   const users = { create: jest.fn(), read: jest.fn(), list: jest.fn(), update: jest.fn(), delete: jest.fn() };
   const user = userFixture().toView();
   beforeAll(async () => {
-    app = await controllerApp(UsersController, [{ provide: UsersUseCase, useValue: users }]);
+    app = await controllerApp(UsersController, [{ provide: UsersUseCase, useValue: users }], user);
   });
   beforeEach(() => jest.resetAllMocks());
   afterAll(async () => {
@@ -19,19 +19,36 @@ describe("UsersController", () => {
     users.create.mockResolvedValue(user);
     await request(app.getHttpServer())
       .post("/users")
-      .send({ email: "ADMIN@BLUE.TEST", name: "Admin", password: "SecurePassword1!", roles: [] })
+      .send({
+        email: "ADMIN@BLUE.TEST",
+        firstName: "Admin",
+        lastName: "Example",
+        password: "SecurePassword1!",
+        roles: []
+      })
       .expect(201, user);
-    expect(users.create).toHaveBeenCalledWith({
-      email: "admin@blue.test",
-      name: "Admin",
-      password: "SecurePassword1!",
-      roles: []
-    });
+    expect(users.create).toHaveBeenCalledWith(
+      {
+        email: "admin@blue.test",
+        firstName: "Admin",
+        lastName: "Example",
+        password: "SecurePassword1!",
+        roles: []
+      },
+      user
+    );
   });
   it("rejects privilege fields outside the DTO", async () => {
     await request(app.getHttpServer())
       .post("/users")
-      .send({ email: "admin@blue.test", name: "Admin", password: "SecurePassword1!", roles: [], enabled: true })
+      .send({
+        email: "admin@blue.test",
+        firstName: "Admin",
+        lastName: "Example",
+        password: "SecurePassword1!",
+        roles: [],
+        enabled: true
+      })
       .expect(400);
     expect(users.create).not.toHaveBeenCalled();
   });
@@ -40,7 +57,7 @@ describe("UsersController", () => {
     await request(app.getHttpServer())
       .get("/users/" + user.id)
       .expect(200, user);
-    expect(users.read).toHaveBeenCalledWith(user.id);
+    expect(users.read).toHaveBeenCalledWith(user.id, user);
   });
   it("rejects invalid UUIDs", async () => {
     await request(app.getHttpServer()).get("/users/invalid").expect(400);
@@ -57,12 +74,12 @@ describe("UsersController", () => {
     await request(app.getHttpServer())
       .get("/users")
       .expect(200, { items: [user], total: 1 });
-    expect(users.list).toHaveBeenCalledWith({ limit: 25, offset: 0 });
+    expect(users.list).toHaveBeenCalledWith({ limit: 25, offset: 0 }, user);
   });
   it("converts explicit pagination to numbers", async () => {
     users.list.mockResolvedValue({ items: [], total: 0 });
     await request(app.getHttpServer()).get("/users?limit=5&offset=10").expect(200);
-    expect(users.list).toHaveBeenCalledWith({ limit: 5, offset: 10 });
+    expect(users.list).toHaveBeenCalledWith({ limit: 5, offset: 10 }, user);
   });
   it.each(["limit=0", "limit=101", "offset=-1", "limit=oops"])("rejects invalid pagination %s", async query => {
     await request(app.getHttpServer())
@@ -71,12 +88,12 @@ describe("UsersController", () => {
     expect(users.list).not.toHaveBeenCalled();
   });
   it("updates permitted fields", async () => {
-    users.update.mockResolvedValue({ ...user, name: "Dentist" });
+    users.update.mockResolvedValue({ ...user, firstName: "Dentist", lastName: "Example" });
     await request(app.getHttpServer())
       .patch("/users/" + user.id)
-      .send({ name: "Dentist" })
+      .send({ firstName: "Dentist", lastName: "Example" })
       .expect(200);
-    expect(users.update).toHaveBeenCalledWith(user.id, { name: "Dentist" });
+    expect(users.update).toHaveBeenCalledWith(user.id, { firstName: "Dentist", lastName: "Example" }, user);
   });
   it("rejects password updates through the user CRUD", async () => {
     await request(app.getHttpServer())
@@ -89,10 +106,10 @@ describe("UsersController", () => {
     await request(app.getHttpServer())
       .delete("/users/" + user.id)
       .expect(200);
-    expect(users.delete).toHaveBeenCalledWith(user.id);
+    expect(users.delete).toHaveBeenCalledWith(user.id, user);
   });
   it("enforces the eight-character minimum when creating users", async () => {
-    const input = { email: "admin@blue.test", name: "Admin", roles: [] };
+    const input = { email: "admin@blue.test", firstName: "Admin", lastName: "Example", roles: [] };
     await request(app.getHttpServer())
       .post("/users")
       .send({ ...input, password: "Abc123!" })
@@ -103,6 +120,19 @@ describe("UsersController", () => {
       .post("/users")
       .send({ ...input, password: "Abcd123!" })
       .expect(201);
-    expect(users.create).toHaveBeenCalledWith({ ...input, password: "Abcd123!" });
+    expect(users.create).toHaveBeenCalledWith({ ...input, password: "Abcd123!" }, user);
+  });
+  it("rejects null edits and the obsolete unstructured name input", async () => {
+    for (const input of [
+      { firstName: null },
+      { lastName: null },
+      { roles: null },
+      { enabled: null },
+      { name: "Old input" }
+    ])
+      await request(app.getHttpServer())
+        .patch("/users/" + user.id)
+        .send(input)
+        .expect(400);
   });
 });

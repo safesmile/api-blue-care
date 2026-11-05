@@ -1,4 +1,3 @@
-import { ROLE_NAMES } from "../../../permissions";
 import { BadRequestException, ConflictException, Injectable, Logger, UnauthorizedException } from "@nestjs/common";
 import { createHash, randomBytes } from "node:crypto";
 import { AccountActionsRepository, AccountMailer, type AccountAction } from "../domain/account-actions.repository";
@@ -39,11 +38,7 @@ export class AccountActionsUseCase {
    */
   async requestActivation(email: string) {
     const user = await this.users.findByEmail(email.trim().toLowerCase());
-    if (
-      user?.props.enabled &&
-      !user.props.verified &&
-      user.props.roles.some(role => ROLE_NAMES.some(allowed => allowed === role))
-    )
+    if (user?.props.enabled && !user.props.verified && user.props.roles.length > 0)
       await this.publicIssue({ email: user.props.email, userId: user.id, kind: "activate" });
   }
   /**

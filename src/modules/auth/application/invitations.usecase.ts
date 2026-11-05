@@ -1,4 +1,8 @@
+import type { AccessActor } from "../../authorization/domain/access-policy";
+import { RolesRepository } from "../../authorization/domain/roles.repository";
+import { personName } from "../../../shared/domain/person-name";
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   GoneException,
@@ -15,6 +19,7 @@ import type { RoleName } from "../../../permissions";
 import type { Pagination } from "../../../shared/domain/crud.repository";
 const digest = (token: string) => createHash("sha256").update(token).digest("hex");
 export interface CreateInvitationInput {
+  patientId?: string;
   email: string;
   firstName: string;
   lastName: string;
@@ -30,11 +35,13 @@ export class InvitationsUseCase {
    * @param invitations Invitation repository or application service.
    * @param mail Account email delivery adapter.
    * @param passwords Password hashing adapter.
+   * @param roles Role definitions or assigned role names.
    */
   constructor(
     private readonly invitations: InvitationRepository,
     private readonly mail: AccountMailer,
-    private readonly passwords: PasswordHasher
+    private readonly passwords: PasswordHasher,
+    private readonly roles: RolesRepository
   ) {}
   /**
    * Creates the resource using the supplied input.
@@ -44,8 +51,11 @@ export class InvitationsUseCase {
    */
   async create(input: CreateInvitationInput, actor: InvitationActor) {
     this.authorizeRoles(input.roles, actor);
+    await this.roles.authorizeAssignment(input.roles, actor);
+    if (!personName(input.firstName, input.lastName)) throw new BadRequestException("Invalid combined name length");
     const token = randomBytes(40).toString("hex");
     const invitation = new Invitation({
+      patientId: input.patientId ?? null,
       email: input.email.trim().toLowerCase(),
       firstName: input.firstName.trim(),
       lastName: input.lastName.trim(),
@@ -63,7 +73,7 @@ export class InvitationsUseCase {
       lastSentAt: null,
       deliveryStatus: "pending"
     });
-    await this.invitations.create(invitation);
+    await this.invitations.create(invitation, actor);
     await this.deliver(invitation, token);
     return (await this.requireInvitation(invitation.id)).toView();
   }
@@ -103,8 +113,9 @@ export class InvitationsUseCase {
   async resend(id: string, actor: InvitationActor) {
     const invitation = await this.requireInvitation(id);
     this.authorizeRoles(invitation.props.roles, actor);
+    await this.roles.authorizeAssignment(invitation.props.roles, actor);
     const token = randomBytes(40).toString("hex");
-    if (!(await this.invitations.rotate(id, digest(token), new Date(Date.now() + 86400000))))
+    if (!(await this.invitations.rotate(id, digest(token), new Date(Date.now() + 86400000), actor)))
       throw new ConflictException("Invitation cannot be resent; it is closed or was sent within the last minute");
     await this.deliver(await this.requireInvitation(id), token);
     return (await this.requireInvitation(id)).toView();
@@ -112,10 +123,11 @@ export class InvitationsUseCase {
   /**
    * Marks the matching session as revoked.
    * @param id Resource identifier.
+   * @param actor Authenticated caller and effective grants.
    */
-  async revoke(id: string) {
+  async revoke(id: string, actor?: AccessActor) {
     await this.requireInvitation(id);
-    if (!(await this.invitations.revoke(id))) throw new ConflictException("Invitation is already closed");
+    if (!(await this.invitations.revoke(id, actor))) throw new ConflictException("Invitation is already closed");
   }
   /**
    * Requires authority over the requested role assignments.

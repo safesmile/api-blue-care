@@ -34,6 +34,12 @@ export const IDENTITY_PERMISSION_DEFINITIONS = [
     scope: "identity.users.delete",
     group: "Users",
     description: "Delete users"
+  },
+  {
+    shortcode: "users:manage",
+    scope: "identity.users.manage",
+    group: "Users",
+    description: "Operate across user identities in addition to operation permissions"
   }
 ] as const;
 export const IDENTITY_PERMISSIONS = {

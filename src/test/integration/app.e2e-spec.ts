@@ -1,11 +1,13 @@
+import { userFixture } from "../helpers/identity.fixture";
 import { AuthUseCase } from "../../modules/auth/application/auth.usecase";
-import testUsersSeeder from "../../../database/seeders/202610280001-test-users.cjs";
-import { createSuperUser } from "../../../scripts/lib/super-user.cjs";
+import testUsersSeeder from "../../../database/seeders/202610280001-test-users";
+import { createSuperUser } from "../../../scripts/lib/super-user";
 import { compare } from "bcryptjs";
 import { syncPermissions } from "../../modules/authorization/infrastructure/sync-permissions";
 import { DEFAULT_ROLE_PERMISSIONS } from "../../permissions";
 import { REGISTERED_PERMISSIONS } from "../../modules/authorization/infrastructure/permission-registry";
 const PERMISSIONS = REGISTERED_PERMISSIONS.map(permission => permission.shortcode);
+const operator = { ...userFixture().toView(), roles: ["superadmin"], permissions: [...PERMISSIONS] };
 import { QueryTypes } from "sequelize";
 import { AppModule } from "../../app.module";
 import { Test } from "@nestjs/testing";
@@ -87,7 +89,8 @@ describe("Blue Dent with PostgreSQL", () => {
       .auth(token, { type: "bearer" })
       .send({
         email: "staff@blue.test",
-        name: "Staff",
+        firstName: "Staff",
+        lastName: "Example",
         password: "TestPassword123!",
         roles: ["customer"]
       })
@@ -100,7 +103,7 @@ describe("Blue Dent with PostgreSQL", () => {
     await request(app.getHttpServer())
       .patch("/api/v1/users/" + id)
       .auth(token, { type: "bearer" })
-      .send({ name: "Dentist" })
+      .send({ firstName: "Dentist", lastName: "Example" })
       .expect(200);
     await request(app.getHttpServer()).get("/api/v1/users?limit=1000").auth(token, { type: "bearer" }).expect(400);
     await request(app.getHttpServer())
@@ -241,25 +244,53 @@ describe("Blue Dent with PostgreSQL", () => {
   });
   it("persists role assignments and derives grants again after a user update", async () => {
     const users = app.get(UsersUseCase);
-    const user = await users.create({
-      email: "role-update@blue.test",
-      name: "Role Update",
-      password: "Abcd123!",
-      roles: ["customer"]
-    });
-    expect(user.permissions).toEqual(["auth:email-change", "auth:me", "auth:password-change"]);
-    const updated = await users.update(user.id, { roles: ["superadmin"] });
+    const user = await users.create(
+      {
+        email: "role-update@blue.test",
+        firstName: "Role Update",
+        lastName: "Example",
+        password: "Abcd123!",
+        roles: ["customer"]
+      },
+      operator
+    );
+    expect(user.permissions).toEqual([
+      "auth:email-change",
+      "auth:me",
+      "auth:password-change",
+      "benefits:self",
+      "memberships:self",
+      "notifications:devices",
+      "notifications:inbox",
+      "notifications:read",
+      "patients:self",
+      "plans:catalog",
+      "prevention:self"
+    ]);
+    const updated = await users.update(user.id, { roles: ["superadmin"] }, operator);
     expect(updated.roles).toEqual(["superadmin"]);
     expect([...updated.permissions].sort()).toEqual([...PERMISSIONS].sort());
-    const stored = await users.read(user.id);
+    const stored = await users.read(user.id, operator);
     expect(stored.roles).toEqual(["superadmin"]);
     expect([...stored.permissions].sort()).toEqual([...PERMISSIONS].sort());
-    await users.update(user.id, { roles: ["customer"] });
-    expect((await users.read(user.id)).permissions).toEqual(["auth:email-change", "auth:me", "auth:password-change"]);
+    await users.update(user.id, { roles: ["customer"] }, operator);
+    expect((await users.read(user.id, operator)).permissions).toEqual([
+      "auth:email-change",
+      "auth:me",
+      "auth:password-change",
+      "benefits:self",
+      "memberships:self",
+      "notifications:devices",
+      "notifications:inbox",
+      "notifications:read",
+      "patients:self",
+      "plans:catalog",
+      "prevention:self"
+    ]);
   });
   it("seeds one verified user per role with the requested password, without duplicates", async () => {
     const db = app.get(Sequelize);
-    const originalTotal = (await app.get(UsersUseCase).list({ limit: 100, offset: 0 })).total;
+    const originalTotal = (await app.get(UsersUseCase).list({ limit: 100, offset: 0 }, operator)).total;
     await testUsersSeeder.up(db.getQueryInterface());
     await testUsersSeeder.up(db.getQueryInterface());
     const rows = await db.query<{
@@ -287,7 +318,9 @@ describe("Blue Dent with PostgreSQL", () => {
       const login = await app.get(AuthUseCase).login(row.email, "Pa$$word123");
       expect(login.user.roles).toEqual([row.role]);
       expect(login.user.permissions.sort()).toEqual(
-        row.role === "superadmin" ? [...PERMISSIONS].sort() : ["auth:email-change", "auth:me", "auth:password-change"]
+        row.role === "superadmin"
+          ? [...PERMISSIONS].sort()
+          : [...DEFAULT_ROLE_PERMISSIONS[row.role as "admin" | "customer"].permissions].sort()
       );
     }
     await testUsersSeeder.down(db.getQueryInterface());
@@ -296,14 +329,21 @@ describe("Blue Dent with PostgreSQL", () => {
       { replacements: { emails: rows.map(row => row.email) }, type: QueryTypes.SELECT }
     );
     expect(remaining[0].count).toBe(0);
-    expect((await app.get(UsersUseCase).list({ limit: 100, offset: 0 })).total).toBe(originalTotal);
-    const collision = await app
-      .get(UsersUseCase)
-      .create({ email: "customer@blue-dent.test", name: "Existing", password: "Abcd123!", roles: ["admin"] });
+    expect((await app.get(UsersUseCase).list({ limit: 100, offset: 0 }, operator)).total).toBe(originalTotal);
+    const collision = await app.get(UsersUseCase).create(
+      {
+        email: "customer@blue-dent.test",
+        firstName: "Existing",
+        lastName: "Example",
+        password: "Abcd123!",
+        roles: ["admin"]
+      },
+      operator
+    );
     await expect(testUsersSeeder.up(db.getQueryInterface())).rejects.toThrow("conflicts with an existing account");
-    expect((await app.get(UsersUseCase).read(collision.id)).roles).toEqual(["admin"]);
-    expect((await app.get(UsersUseCase).list({ limit: 100, offset: 0 })).total).toBe(originalTotal + 1);
-    await app.get(UsersUseCase).delete(collision.id);
+    expect((await app.get(UsersUseCase).read(collision.id, operator)).roles).toEqual(["admin"]);
+    expect((await app.get(UsersUseCase).list({ limit: 100, offset: 0 }, operator)).total).toBe(originalTotal + 1);
+    await app.get(UsersUseCase).delete(collision.id, operator);
   }, 15000);
   it("manages invitation previews, metadata, resends, expiration, acceptance and revocation", async () => {
     const db = app.get(Sequelize);
@@ -396,12 +436,16 @@ describe("Blue Dent with PostgreSQL", () => {
   it("activates a registered customer, isolates account ownership and verifies channel changes", async () => {
     const users = app.get(UsersUseCase);
     const auth = app.get(AuthUseCase);
-    const account = await users.create({
-      email: "activation@blue.test",
-      name: "Patient",
-      password: "Abcd123!",
-      roles: ["customer"]
-    });
+    const account = await users.create(
+      {
+        email: "activation@blue.test",
+        firstName: "Patient",
+        lastName: "Example",
+        password: "Abcd123!",
+        roles: ["customer"]
+      },
+      operator
+    );
     expect(account.verified).toBe(false);
     await expect(auth.login("activation@blue.test", "Abcd123!")).rejects.toThrow();
     await request(app.getHttpServer())
@@ -420,12 +464,12 @@ describe("Blue Dent with PostgreSQL", () => {
       .post("/api/v1/auth/activation/confirm")
       .send({ token: "0".repeat(80), password: "Abcd123!" })
       .expect(400);
-    expect((await users.read(account.id)).verified).toBe(false);
+    expect((await users.read(account.id, operator)).verified).toBe(false);
     await request(app.getHttpServer())
       .post("/api/v1/auth/activation/confirm")
       .send({ token: activation, password: "Abcd123!" })
       .expect(204);
-    expect((await users.read(account.id)).verified).toBe(true);
+    expect((await users.read(account.id, operator)).verified).toBe(true);
     const a = await auth.login("activation@blue.test", "Abcd123!");
     const b = await auth.login("invite@blue.test", "TestPassword123!");
     const own = await request(app.getHttpServer())
@@ -456,7 +500,7 @@ describe("Blue Dent with PostgreSQL", () => {
       .auth(current.token, { type: "bearer" })
       .send({ email: "verified-new@blue.test", currentPassword: "Changed123!" })
       .expect(202);
-    expect((await users.read(account.id)).email).toBe("activation@blue.test");
+    expect((await users.read(account.id, operator)).email).toBe("activation@blue.test");
     const emailToken = emails
       .filter(email => email.email === "verified-new@blue.test" && email.kind === "email-change")
       .at(-1)!.token;
@@ -464,9 +508,9 @@ describe("Blue Dent with PostgreSQL", () => {
       .post("/api/v1/auth/email/confirm")
       .send({ token: "0".repeat(80) })
       .expect(400);
-    expect((await users.read(account.id)).email).toBe("activation@blue.test");
+    expect((await users.read(account.id, operator)).email).toBe("activation@blue.test");
     await request(app.getHttpServer()).post("/api/v1/auth/email/confirm").send({ token: emailToken }).expect(204);
-    expect((await users.read(account.id)).email).toBe("verified-new@blue.test");
+    expect((await users.read(account.id, operator)).email).toBe("verified-new@blue.test");
     await request(app.getHttpServer()).get("/api/v1/auth/me").auth(current.token, { type: "bearer" }).expect(401);
     await request(app.getHttpServer()).get("/api/v1/auth/me").auth(b.token, { type: "bearer" }).expect(200);
     expect((await auth.login("verified-new@blue.test", "Changed123!")).user.id).toBe(account.id);
@@ -499,12 +543,16 @@ describe("Blue Dent with PostgreSQL", () => {
   }, 15000);
   it("verifies a pre-registered staff identity without creating another account", async () => {
     const users = app.get(UsersUseCase);
-    const account = await users.create({
-      email: "registered-admin@blue.test",
-      name: "Staff",
-      password: "Abcd123!",
-      roles: ["admin"]
-    });
+    const account = await users.create(
+      {
+        email: "registered-admin@blue.test",
+        firstName: "Staff",
+        lastName: "Example",
+        password: "Abcd123!",
+        roles: ["admin"]
+      },
+      operator
+    );
     expect(account.verified).toBe(false);
     await request(app.getHttpServer())
       .post("/api/v1/auth/activation/request")
@@ -515,7 +563,7 @@ describe("Blue Dent with PostgreSQL", () => {
       .post("/api/v1/auth/activation/confirm")
       .send({ token, password: "Abcd123!" })
       .expect(204);
-    const verified = await users.read(account.id);
+    const verified = await users.read(account.id, operator);
     expect(verified.verified).toBe(true);
     expect(verified.roles).toEqual(["admin"]);
   });

@@ -10,13 +10,13 @@ import prettier from "eslint-plugin-prettier/recommended";
 import { fixupPluginRules } from "@eslint/compat";
 export default tseslint.config(
   { ignores: ["node_modules/**", "dist/**", "coverage/**", "work/**"] },
-  { ...eslint.configs.recommended, files: ["**/*.{ts,cjs,mjs}"] },
-  ...tseslint.configs.recommended.map(config => ({ ...config, files: ["src/**/*.ts"] })),
-  { ...node.configs["flat/recommended"], files: ["src/**/*.ts"] },
-  { ...jsdoc.configs["flat/recommended-typescript-error"], files: ["src/**/*.ts"] },
+  { ...eslint.configs.recommended, files: ["**/*.{ts,mjs}"] },
+  ...tseslint.configs.recommended.map(config => ({ ...config, files: ["{src,scripts,database}/**/*.ts"] })),
+  { ...node.configs["flat/recommended"], files: ["{src,scripts,database}/**/*.ts"] },
+  { ...jsdoc.configs["flat/recommended-typescript-error"], files: ["{src,scripts,database}/**/*.ts"] },
   prettier,
   {
-    files: ["**/*.{ts,cjs,mjs}"],
+    files: ["**/*.{ts,mjs}"],
     languageOptions: { globals: { ...globals.node, ...globals.jest } },
     plugins: {
       "@typescript-eslint": tseslint.plugin,
@@ -86,6 +86,12 @@ export default tseslint.config(
           templates: true,
           lang: "en_US",
           skipWords: [
+            "recurrente",
+            "noopener",
+            "noreferrer",
+            "mso",
+            "idempotency",
+            "consumptions",
             "shortcode",
             "varchar",
             "dict",
@@ -290,5 +296,5 @@ export default tseslint.config(
       "n/no-extraneous-import": "off"
     }
   },
-  { files: ["**/*.cjs"], rules: { "@typescript-eslint/no-unused-vars": "off", "jsdoc/require-jsdoc": "off" } }
+  { files: ["{scripts,database}/**/*.ts"], rules: { "jsdoc/require-jsdoc": "off" } }
 );

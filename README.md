@@ -1,6 +1,8 @@
 # API Blue Dent
 
-API NestJS 11 para Blue Dent, con DDD pragmático, PostgreSQL y Sequelize. Las reglas para futuras conversaciones están en .codex/architecture.md y el alcance actual en .codex/project-context.md; AGENTS.md enlaza ambos.
+Las decisiones de producto vigentes de Blue Care + se encuentran en [docs/business-rules.md](docs/business-rules.md), con su registro central en Notion. Leerlas antes de desarrollar pacientes, membresías, pagos, beneficios, núcleo familiar o roles; distinguen decisiones confirmadas de preguntas abiertas.
+
+API NestJS 11 para Blue Dent (Node.js 22+), con DDD pragmático, PostgreSQL y Sequelize. Las reglas para futuras conversaciones están en .codex/architecture.md y el alcance actual en .codex/project-context.md; AGENTS.md enlaza ambos.
 
 ## Arranque local
 
@@ -81,11 +83,13 @@ Solo se preparó la configuración; no se ejecutaron servicios. Documentación d
 | POST | auth/password/change | auth:password-change; currentPassword/newPassword |
 | POST | auth/email/change | auth:email-change; email/currentPassword |
 | POST | auth/email/confirm | Público; token de verificación del nuevo email |
-| GET | users | users:list |
+| GET | users | users:list + users:manage |
 | GET | users/:id | users:read |
-| POST | users | users:create; email/name/password/roles |
-| PATCH | users/:id | users:update; name/enabled/roles |
+| POST | users | users:create + users:manage + roles:assign; email/firstName/lastName/password/roles |
+| PATCH | users/:id | users:update; firstName/lastName/enabled/roles; asignación exige roles:assign |
 | DELETE | users/:id | users:delete |
+| GET | audit | audit:list; filtros y paginación |
+| GET | audit/:id | audit:read |
 
 Listado: limit (1–100, defecto 25), offset (defecto 0), respuesta items/total. No hay registro público. Los permisos administrativos permiten asignar permisos y deben reservarse a administradores.
 
@@ -107,17 +111,17 @@ src/modules/<contexto> contiene domain (entidades/puertos), application (casos d
 
 ## Permisos y roles
 
-Cada módulo define su propio catálogo (shortcode, scope, descripción y grupo) en su archivo de dominio *.permissions.ts: identity.permissions.ts y auth.permissions.ts. Los controladores importan los permisos de su módulo. src/permissions.ts solo define las políticas de superadmin, admin y customer; no reúne catálogos ni operaciones de módulos. La sincronización registra los catálogos en la infraestructura de authorization, y los límites públicos viven en auth.throttle.ts. Se sigue la filosofía de Kraken: permisos con códigos estables, roles protegidos que agrupan permisos y acceso efectivo como unión de los roles del usuario, sin organizaciones ni multitenencia.
+Cada módulo define su propio catálogo (shortcode, scope, descripción y grupo) en su archivo de dominio *.permissions.ts: identity.permissions.ts, auth.permissions.ts, authorization.permissions.ts y notification.permissions.ts. Los controladores importan los permisos de su módulo. src/permissions.ts solo define las políticas de superadmin, admin y customer; no reúne catálogos ni operaciones de módulos. La sincronización registra los catálogos en la infraestructura de authorization, y los límites públicos viven en auth.throttle.ts. Se sigue la filosofía de Kraken: permisos con códigos estables, roles protegidos que agrupan permisos y acceso efectivo como unión de los roles del usuario, sin organizaciones ni multitenencia.
 
-Las tablas son permissions, roles, role_permissions y user_roles. Los permisos se resuelven en cada petición, por lo que cambiar un rol no exige volver a iniciar sesión. users.permissions no se persiste: la migración 005 retira la columna heredada. La propiedad permissions en la respuesta JSON es una lista calculada mediante user_roles → roles → role_permissions → permissions; sirve para conocer el acceso efectivo, no es una copia guardada en users. PostgreSQL muestra un array vacío como {}, lo que no indica un objeto JSON ni que falten los permisos del rol. En usuarios e invitaciones se envía roles, por ejemplo ["customer"]; el servidor devuelve roles y permissions calculados. Crear y cambiar asignaciones exige también roles:assign. Solo superadmin puede otorgar superadmin o modificar/eliminar cuentas que ya tienen ese rol.
+Las tablas son permissions, roles, role_permissions y user_roles. Los permisos se resuelven en cada petición, por lo que cambiar un rol no exige volver a iniciar sesión. users.permissions no se persiste: la migración 005 retira la columna heredada. La propiedad permissions en la respuesta JSON es una lista calculada mediante user_roles → roles → role_permissions → permissions; sirve para conocer el acceso efectivo, no es una copia guardada en users. PostgreSQL muestra un array vacío como {}, lo que no indica un objeto JSON ni que falten los permisos del rol. En usuarios e invitaciones se envía roles, por ejemplo ["customer"]; el servidor devuelve roles y permissions calculados. Crear y cambiar asignaciones exige también roles:assign y comprobar que los roles no exceden los permisos del actor. users:manage habilita operar otras identidades junto al permiso específico, independientemente del nombre del rol. Solo superadmin puede otorgar superadmin o modificar/eliminar cuentas que ya tienen ese rol.
 
 Roles predeterminados:
 
 - superadmin: política "*", que la sincronización resuelve a todos los permisos de los módulos registrados.
-- admin: perfil y cambio propio de contraseña/email; los permisos administrativos se definirán en el archivo central.
-- customer: perfil y cambio propio de contraseña/email; los permisos de negocio de cliente se incorporarán cuando existan esos módulos.
+- admin: perfil, credenciales y bandeja propios; gestión de roles personalizados, catálogo de permisos y roles:assign. Solo puede delegar sus propios permisos; la matriz clínica sigue pendiente.
+- customer: perfil, credenciales y bandeja propios; los permisos de negocio de cliente se incorporarán cuando existan esos módulos.
 
-No se agregaron permisos de catálogo público ni endpoints de catálogo en línea. Cada nuevo caso de uso privado debe registrar su código en el archivo de permisos de su propio módulo y declarar @Permissions en su endpoint. Al agregar un módulo, registrar su catálogo en permission-registry.ts y ampliar el tipo Permission compartido; las políticas de roles seleccionan códigos de cada módulo. Un endpoint privado sin política se deniega. Un caso público debe declarar @Public y un límite @Throttle; no se le exige un permiso porque todavía no hay usuario autenticado.
+No se agregaron permisos de catálogo comercial público. El catálogo privado de permisos se consulta en GET permissions. Cada nuevo caso de uso privado debe registrar su código en el archivo de permisos de su propio módulo y declarar @Permissions en su endpoint. Al agregar un módulo, registrar su catálogo en permission-registry.ts y ampliar el tipo Permission compartido; las políticas de roles seleccionan códigos de cada módulo. Un endpoint privado sin política se deniega. Un caso público debe declarar @Public y un límite @Throttle; no se le exige un permiso porque todavía no hay usuario autenticado.
 
 Aplicar los cambios desde la raíz de la API:
 
@@ -125,6 +129,8 @@ Aplicar los cambios desde la raíz de la API:
 npm run db:migrate
 npm run permissions
 ```
+
+La gestión de roles personalizados y el catálogo privado están implementados. Consultar [docs/identity-authorization.md](docs/identity-authorization.md) para las rutas, permisos, protección de roles iniciales, delegación y requisitos del frontend. Los roles iniciales no limitan los nombres permitidos. El guard valida sesión y política de ruta; propiedad y asignación se comprueban en casos de uso y persistencia.
 
 La sincronización es transaccional e idempotente: actualiza descripciones y códigos, elimina permisos retirados del catálogo y reemplaza los permisos de los tres roles predeterminados, conservando sus IDs y las asignaciones de usuarios. Los cambios manuales en esos roles serán sustituidos por lo definido en el archivo central. No crea usuarios ni cambia sus roles por defecto.
 
@@ -135,7 +141,7 @@ npm run db:migrate
 npm run createSuperUser
 ```
 
-Nombre y apellido se guardan por separado; name conserva el nombre completo. El script valida email y contraseña, solicita confirmación y oculta la escritura de ambas entradas de contraseña. Solo funciona en terminal interactiva; no recibe contraseñas por argumentos ni por variables ADMIN_*. No crea una cuenta de forma automática al arrancar el servidor.
+Nombre y apellido se guardan por separado; name se deriva como nombre completo en las altas y ediciones HTTP. POST/PATCH users ya no aceptan name como entrada; el cliente debe enviar firstName/lastName. El script valida email y contraseña, solicita confirmación y oculta la escritura de ambas entradas de contraseña. Solo funciona en terminal interactiva; no recibe contraseñas por argumentos ni por variables ADMIN_*. No crea una cuenta de forma automática al arrancar el servidor.
 
 La migración roles-permissions solo crea las tablas, claves e índices; no contiene INSERT, roles predeterminados ni permisos. La migración user-profile adapta el esquema de perfiles e invitaciones. npm run permissions es quien actualiza los datos de roles y permisos y convierte una sola vez los permisos históricos en roles de compatibilidad, sin ascender usuarios. La migración 005 remove-legacy-permissions elimina las columnas antiguas users.permissions y account_actions.permissions. En una instalación existente, ejecutar primero npm run permissions y después npm run db:migrate: si quedan grants históricos sin convertir, la migración se detiene para no perderlos. No se reconstruyen tablas ni usuarios. No se deben revertir migraciones que ya contienen datos para forzar este cambio.
 
@@ -180,3 +186,53 @@ Las pruebas están en src/test/modules/<modulo>, con un archivo .usecase.spec.ts
 - npm run test:cov -- --runInBand ejecuta las pruebas con cobertura de todos los casos de uso y controladores.
 
 Estado: 140 pruebas aisladas y 16 de integración. Cobertura de casos de uso y controladores: 100% líneas, sentencias y funciones; 83.09% ramas. Los umbrales impiden añadir nuevas clases sin cobertura.
+
+## Servicios cloud y notificaciones
+
+Consultar [docs/cloud-services.md](docs/cloud-services.md) para ADC local sin clave JSON, identidad de servicio de Cloud Run, permisos IAM, buckets, Cloud Tasks, Cloud Scheduler y SendGrid. `.env.example` documenta las variables. Mailpit existente: SMTP localhost:1025, bandeja http://localhost:8025; Google jobs desactivados por defecto.
+
+La migración 202611030001 añade bandeja y outbox durables. Después de migrar y sincronizar permisos, `npm run notifications:drain` procesa una tanda local. `gcp:queue:ensure` y `gcp:scheduler:sync` son provisión explícita para cuando exista el proyecto Google; no se ejecutan al arrancar. No requieren Redis/BullMQ. Los callbacks internos verifican OIDC, sin confiar en headers de jobs ni permitir bypass de desarrollo.
+
+Los correos de autenticación conservan el envío inmediato y utilizan el transporte compartido, seleccionable entre Mailpit/SMTP y SendGrid. Las notificaciones generales soportan email y bandeja propia; push y preferencias no están implementados. No se han aprovisionado ni probado recursos reales de Google o SendGrid.
+
+## TypeScript en scripts y base de datos
+
+Todo el código mantenido en `scripts/` y `database/` utiliza `.ts`, con tipos comprobados por `npm run test:typecheck` y las mismas reglas de lint/formato del proyecto. Los comandos npm ejecutan los scripts mediante `ts-node`; no necesitan una compilación previa de la API. La compilación de Nest se limita a `src/`, conservando `dist/main.js` como entrada de producción.
+
+Usar los comandos `npm run db:migrate`, `npm run db:migrate:undo`, `npm run db:migrate:reset` y `npm run db:seed`. El wrapper `scripts/database.ts` conserva sequelize-cli, configura explícitamente las rutas y carga TypeScript. `.sequelizerc` se retiró. La configuración CLI requiere un puente JavaScript temporal generado automáticamente, sin credenciales embebidas, que se elimina al terminar; no se mantiene código JavaScript duplicado en el proyecto.
+
+Antes de invocar Sequelize, el wrapper adapta transaccionalmente los nombres históricos `.cjs` de `SequelizeMeta` (y `SequelizeData` si existe) a los archivos `.ts` presentes. Así no se vuelven a ejecutar migraciones ya aplicadas. Si encuentra ambos nombres para una misma migración, se detiene sin normalización parcial. No hace reset ni cambia registros de negocio para esta adaptación. Para nuevas migraciones usar `.ts` y conservar siempre sus nombres después de ejecutarlas.
+
+Estos comandos son herramientas operativas del repositorio y requieren dependencias de desarrollo instaladas (`npm ci`, incluido `ts-node`). La imagen productiva conserva solo la API compilada; ejecutar migraciones como un paso separado de despliegue con las herramientas disponibles. `db:migrate:reset` mantiene su comportamiento destructivo explícito y sus seeders de prueba; no se utiliza para actualizar instalaciones existentes.
+
+## Auditoría y eventos de ciclo de vida
+
+Consultar [docs/audit-events.md](docs/audit-events.md). La migración 202611030002 agrega auditoría de solo lectura, con protección PostgreSQL contra alteraciones. Los repositorios guardan cambios sensibles, actor, fecha, recurso, motivo opcional y snapshots permitidos en la misma transacción que sus avisos en bandeja/outbox. No capturan contraseñas ni tokens. Las mutaciones administrativas admiten reason opcional; X-Request-ID se genera en servidor. Los errores de auditoría/outbox revierten el cambio original.
+
+Se conectaron usuarios, roles, invitaciones, activación y cambios confirmados de contraseña/email. Los mensajes transaccionales se entregan con el barrido existente o notifications:drain; no se envían correos dentro de la transacción. Los enlaces de autenticación conservan envío inmediato. Membresías/Recurrente/beneficios/prevención se conectarán cuando existan sus módulos. Actualizar con db:migrate y permissions, sin reset.
+
+## Pacientes y clínicas
+
+Implementados RF-005–RF-008: datos administrativos del paciente, catálogo de sedes, personal por clínica, asociaciones, perfiles propios y vínculo cuenta–paciente por contacto verificado. La autorización combina permiso de operación y clínicas asignadas, con `clinics:all` para alcance global. No se crean membresías ni pacientes automáticamente a partir de roles.
+
+Aplicar `npm run db:migrate` y `npm run permissions`. No usar reset para actualizar una base con datos. Contratos, ejemplos, políticas y permisos en [docs/patients-clinics.md](docs/patients-clinics.md). Las invitaciones aceptan `patientId` opcional; la aceptación verifica y vincula dentro de la misma transacción. `GET/PATCH patients/me` usa exclusivamente el vínculo de la cuenta autenticada.
+
+## Planes versionados y membresías
+
+Implementados planes con revisiones inmutables, publicación explícita y precios GTQ. Las membresías son globales por paciente, conservan el precio contratado y registran cada período pagado sin sobrescribir historia. Los textos publicados del plan se actualizan también para miembros existentes. La cancelación conserva cobertura pagada y detiene renovaciones; la suspensión bloquea inmediatamente y pausa cobros sin extender vencimiento.
+
+Migración `202611040002-plans-memberships.ts`; aplicar `npm run db:migrate` y `npm run permissions`. Se agregan `plans:catalog` y `memberships:self` a las políticas iniciales para acceso propio. La pasarela Recurrente está deshabilitada por defecto; no hay activación manual ni pagos simulados en producción. Checkout hospedado y webhook Svix se documentan junto con variables, rutas, límites y configuración de Sandbox en [docs/plans-memberships.md](docs/plans-memberships.md).
+
+Worker local: `npm run memberships:drain`. Google Scheduler: `npm run gcp:scheduler:sync -- --memberships`, únicamente después de configurar nube/IAM. No se siembran precios comerciales ni se crean recursos externos al arrancar. Los saldos, beneficiarios y consumos del paso 6 ya están implementados: ver docs/benefits.md.
+
+### Beneficios y saldo global
+
+Implementado el paso 6: configuración versionada, cupos individuales globales entre clínicas, familia, canjes concurrentes, anulaciones y comprobantes temporales para QR. Contratos, permisos, reglas y límites en [docs/benefits.md](docs/benefits.md); decisiones confirmadas en DN-15 de business-rules.md. Actualizar con `npm run db:migrate` y `npm run permissions`, sin reset. No requiere variables nuevas.
+
+### Prevención, recordatorios y dashboard
+
+Backend del paso 7: eventos preventivos y línea temporal, intervalos por paciente, avisos configurables de siete días y un día por bandeja/correo/push, métricas y listas por clínica. [Contratos y operación](docs/prevention-reminders-dashboard.md). Aplicar `npm run db:migrate` y `npm run permissions`; generar avisos con `npm run prevention:drain` y entregar correo/push con `npm run notifications:drain`. FCM se mantiene deshabilitado (`PUSH_ENABLED=false`) hasta configurar proyecto Firebase/ADC y dispositivos. El frontend sigue pendiente.
+
+### Diseño de correos
+
+Cuentas y notificaciones usan un diseño HTML compartido, con texto alternativo y contenido específico por acción. [Arquitectura, configuración y vistas previas](docs/email-templates.md). Generar ejemplos sin enviar con `npm run emails:preview`. EMAIL_APP_NAME, EMAIL_PRIMARY_COLOR, EMAIL_LOGO_URL y EMAIL_SUPPORT_EMAIL son opcionales; el color se escribe entre comillas en .env. No requiere migración.

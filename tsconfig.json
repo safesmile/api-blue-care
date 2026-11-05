@@ -22,5 +22,15 @@
     "strictBindCallApply": false,
     "noFallthroughCasesInSwitch": false,
     "strictPropertyInitialization": true
-  }
+  },
+  "include": [
+    "src/**/*.ts",
+    "scripts/**/*.ts",
+    "database/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "work"
+  ]
 }
