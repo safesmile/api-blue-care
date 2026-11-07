@@ -7,7 +7,7 @@ import {
   ServiceUnavailableException
 } from "@nestjs/common";
 import { createHash } from "node:crypto";
-import { InvitationsUseCase } from "../../../modules/auth/application/invitations.usecase";
+import { InvitationsUseCase } from "../../helpers/usecases/InvitationsUseCase";
 import { Invitation } from "../../../modules/auth/domain/invitation.entity";
 import type { InvitationRepository } from "../../../modules/auth/domain/invitation.repository";
 import type { AccountMailer } from "../../../modules/auth/domain/account-actions.repository";
@@ -18,6 +18,7 @@ describe("InvitationsUseCase", () => {
   let passwords: ReturnType<typeof identityFixture>["passwords"];
   let useCase: InvitationsUseCase;
   let invitation: Invitation;
+  let roleOptions: jest.Mock;
   const input = {
     email: " INVITED@BLUE.TEST ",
     firstName: "Ana",
@@ -58,7 +59,9 @@ describe("InvitationsUseCase", () => {
     };
     mail = { send: jest.fn() };
     passwords = identityFixture().passwords;
+    roleOptions = jest.fn().mockResolvedValue([]);
     useCase = new InvitationsUseCase(repository, mail, passwords, {
+      clinicAssignable: roleOptions,
       authorizeAssignment: jest.fn()
     } as unknown as RolesRepository);
   });
@@ -153,6 +156,42 @@ describe("InvitationsUseCase", () => {
   it("rejects a name that exceeds the combined storage limit", async () => {
     await expect(
       useCase.create({ ...input, firstName: "a".repeat(60), lastName: "b".repeat(60) }, actor)
-    ).rejects.toThrow("Invalid combined name");
+    ).rejects.toThrow("La longitud total del nombre");
+  });
+  it("separates fixed patient onboarding from role delegation and requires a selected clinic", async () => {
+    const patientActor = {
+      ...actor,
+      clinicId: actor.id,
+      permissions: ["invitations:create", "patients:link"] as const
+    };
+    expect(() => useCase.invitePatient(input, { ...actor, clinicId: null })).toThrow("Seleccione una clínica");
+    await expect(useCase.invitePatient(input, { ...actor, clinicId: actor.id })).rejects.toThrow(
+      "No tiene permiso para invitar pacientes"
+    );
+    const result = await useCase.invitePatient(input, { ...patientActor, permissions: [...patientActor.permissions] });
+    expect(result).toMatchObject({ kind: "patient", roles: ["customer"], staff: false, clinicAssignments: [] });
+    repository.rotate.mockResolvedValue(true);
+    await useCase.resend(invitation.id, { ...patientActor, permissions: [...patientActor.permissions] });
+    expect(repository.rotate).toHaveBeenCalled();
+  });
+  it("assigns only a basic staff identity plus the explicitly selected clinic work role", async () => {
+    const contact = {
+      email: input.email,
+      firstName: input.firstName,
+      lastName: input.lastName,
+      clinicId: actor.id,
+      role: "reception"
+    };
+    const result = await useCase.inviteCollaborator(contact, actor);
+    expect(result).toMatchObject({
+      kind: "collaborator",
+      staff: true,
+      roles: ["staff"],
+      clinicAssignments: [{ clinicId: actor.id, roles: ["reception"] }]
+    });
+    for (const role of ["customer", "staff", "superadmin", "legacy-old"])
+      expect(() => useCase.inviteCollaborator({ ...contact, role }, actor)).toThrow("Seleccione un rol de trabajo");
+    expect(await useCase.collaboratorRoles(actor.id, actor)).toEqual([]);
+    expect(roleOptions).toHaveBeenCalledWith(actor.id, actor);
   });
 });

@@ -1,6 +1,6 @@
 import request from "supertest";
 import { PreventionController } from "../../../modules/prevention/presentation/prevention.controller";
-import { PreventionUseCase } from "../../../modules/prevention/application/prevention.usecase";
+import { PreventionUseCase } from "../../helpers/usecases/PreventionUseCase";
 import { controllerApp } from "../../helpers/controller-app";
 import { userFixture } from "../../helpers/identity.fixture";
 describe("PreventionController", () => {
@@ -20,7 +20,7 @@ describe("PreventionController", () => {
     input = { ...schedule, patientId: id, clinicId: id, typeId: id, idempotencyKey: id };
   let app;
   beforeAll(async () => {
-    app = await controllerApp(PreventionController, [{ provide: PreventionUseCase, useValue: service }], actor);
+    app = await controllerApp(PreventionController, [...PreventionUseCase.providers(service)], actor);
   });
   afterAll(async () => {
     await app.close();

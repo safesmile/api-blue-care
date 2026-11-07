@@ -20,8 +20,8 @@ const SELECT_BENEFIT =
 @Injectable()
 export class SqlBenefitRepository extends BenefitRepository {
   /**
-   * Initializes the benefit service dependencies.
-   * @param db PostgreSQL connection.
+   * Recibe las dependencias de la operación.
+   * @param db Dependencia tipada de db.
    */
   constructor(private readonly db: Sequelize) {
     super();
@@ -41,7 +41,7 @@ export class SqlBenefitRepository extends BenefitRepository {
           transaction,
           type: QueryTypes.SELECT
         });
-        if (!plan) throw new NotFoundException("Plan not found");
+        if (!plan) throw new NotFoundException("No se encontró el plan");
         await this.db.query(
           'INSERT INTO benefit_definitions (id,"planId",code,kind,period,audience,"createdAt") VALUES (:id,:planId,:code,:kind,:period,:audience,NOW())',
           { replacements: { ...input, id }, transaction }
@@ -56,7 +56,7 @@ export class SqlBenefitRepository extends BenefitRepository {
       });
     } catch (error) {
       if (error instanceof UniqueConstraintError)
-        throw new ConflictException("Benefit code already exists in this plan");
+        throw new ConflictException("El código del beneficio ya existe en este plan");
       throw error;
     }
     return (await this.read(id))!;
@@ -105,12 +105,14 @@ export class SqlBenefitRepository extends BenefitRepository {
         transaction,
         type: QueryTypes.SELECT
       });
-      if (!benefit) throw new NotFoundException("Benefit not found");
+      if (!benefit) throw new NotFoundException("No se encontró el beneficio");
       if (
         (benefit.kind === "discount") !==
         (input.discountBasisPoints !== undefined && input.discountBasisPoints !== null)
       )
-        throw new BadRequestException("Discount benefits require basis points; services and items must omit them");
+        throw new BadRequestException(
+          "Los descuentos requieren puntos básicos; los servicios y artículos deben omitirlos"
+        );
       const [next] = await this.db.query<{ number: number }>(
         'SELECT COALESCE(MAX(number),0)+1 AS number FROM benefit_versions WHERE "benefitId"=:id',
         { replacements: { id }, transaction, type: QueryTypes.SELECT }
@@ -155,7 +157,7 @@ export class SqlBenefitRepository extends BenefitRepository {
    * @returns The persisted result or completion of the authorized operation.
    */
   async versions(id: string, page: Pagination) {
-    if (!(await this.read(id))) throw new NotFoundException("Benefit not found");
+    if (!(await this.read(id))) throw new NotFoundException("No se encontró el beneficio");
     const items = await this.db.query<BenefitVersion>(
       'SELECT * FROM benefit_versions WHERE "benefitId"=:id ORDER BY number DESC LIMIT :limit OFFSET :offset',
       { replacements: { id, ...page }, type: QueryTypes.SELECT }
@@ -180,15 +182,15 @@ export class SqlBenefitRepository extends BenefitRepository {
         transaction,
         type: QueryTypes.SELECT
       });
-      if (!before) throw new NotFoundException("Benefit not found");
+      if (!before) throw new NotFoundException("No se encontró el beneficio");
       if (before.currentVersionId === versionId) return;
       const [version] = await this.db.query<BenefitVersion>(
         'SELECT * FROM benefit_versions WHERE id=:versionId AND "benefitId"=:id',
         { replacements: { id, versionId }, transaction, type: QueryTypes.SELECT }
       );
-      if (!version) throw new NotFoundException("Version does not belong to this benefit");
+      if (!version) throw new NotFoundException("La versión no pertenece a este beneficio");
       if (version.publishedAt)
-        throw new ConflictException("Create a revision instead of republishing historical rules");
+        throw new ConflictException("Cree una nueva versión; no se pueden volver a publicar reglas históricas");
       await this.db.query('UPDATE benefit_versions SET "publishedAt"=NOW() WHERE id=:versionId', {
         replacements: { versionId },
         transaction
@@ -218,7 +220,7 @@ export class SqlBenefitRepository extends BenefitRepository {
       replacements: { planId },
       type: QueryTypes.SELECT
     });
-    if (!plan) throw new NotFoundException("Plan not found");
+    if (!plan) throw new NotFoundException("No se encontró el plan");
     const [row] = await this.db.query<{ planId: string; maxBeneficiaries: number }>(
       'SELECT "planId","maxBeneficiaries" FROM plan_family_settings WHERE "planId"=:planId',
       { replacements: { planId }, type: QueryTypes.SELECT }
@@ -239,7 +241,7 @@ export class SqlBenefitRepository extends BenefitRepository {
         transaction,
         type: QueryTypes.SELECT
       });
-      if (!plan) throw new NotFoundException("Plan not found");
+      if (!plan) throw new NotFoundException("No se encontró el plan");
       const [settings] = await this.db.query<{ maxBeneficiaries: number }>(
         'SELECT "maxBeneficiaries" FROM plan_family_settings WHERE "planId"=:planId',
         { replacements: { planId }, transaction, type: QueryTypes.SELECT }

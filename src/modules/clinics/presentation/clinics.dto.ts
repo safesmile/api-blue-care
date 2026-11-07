@@ -1,3 +1,4 @@
+import { IsArray, ArrayMinSize, ArrayUnique, MaxLength as RoleMaxLength } from "class-validator";
 import { Transform, Type } from "class-transformer";
 import { IsBoolean, IsEmail, IsInt, IsString, Length, Matches, Max, Min, ValidateIf } from "class-validator";
 import { AuditReasonDto } from "../../../shared/presentation/audit-reason.dto";
@@ -69,4 +70,15 @@ export class ClinicQueryDto {
   @Transform(({ value }) => (value === "true" ? true : value === "false" ? false : value))
   @IsBoolean()
   enabled?: boolean;
+}
+
+/** Explicit role assignment for one clinic; an empty assignment is removed through DELETE. */
+export class AssignClinicStaffDto extends AuditReasonDto {
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayUnique()
+  @IsString({ each: true })
+  @RoleMaxLength(60, { each: true })
+  @Matches(/^[a-z][a-z0-9-]{1,59}$/, { each: true })
+  roles!: string[];
 }

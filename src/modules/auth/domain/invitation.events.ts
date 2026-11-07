@@ -17,6 +17,9 @@ export function invitationChange(
   after: object | null
 ): ChangeInput {
   const fields = [
+    "kind",
+    "clinicAssignments",
+    "staff",
     "patientId",
     "email",
     "firstName",

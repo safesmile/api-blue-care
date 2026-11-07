@@ -9,9 +9,9 @@ import { SessionModel } from "./session.model";
 @Injectable()
 export class SequelizeSessionRepository extends SessionRepository {
   /**
-   * Receives the dependencies required by this component.
-   * @param model Sequelize model used for persistence.
-   * @param db Database connection used to coordinate transactions.
+   * Recibe las dependencias de la operación.
+   * @param model Dependencia tipada de model.
+   * @param db Dependencia tipada de db.
    */
   constructor(
     @InjectModel(SessionModel) private readonly model: typeof SessionModel,
@@ -52,11 +52,19 @@ export class SequelizeSessionRepository extends SessionRepository {
    * Checks session ownership, revocation and expiration.
    * @param id Resource identifier.
    * @param userId Identifier of the session owner.
+   * @param clinicId Selected clinic, or null for all authorized assignments.
+   * @param mode Patient or staff portal for this session.
    * @returns Whether the required checks passed.
    */
-  async isActive(id: string, userId: string) {
+  async isActive(id: string, userId: string, clinicId?: string | null, mode?: "patient" | "staff") {
     const row = await this.model.findOne({
-      where: { id, userId, revoked: false }
+      where: {
+        id,
+        userId,
+        revoked: false,
+        ...(clinicId === undefined ? {} : { clinicId }),
+        ...(mode === undefined ? {} : { mode })
+      }
     });
     return !!row && row.expiresAt.getTime() > Date.now() && row.absoluteExpiresAt.getTime() > Date.now();
   }

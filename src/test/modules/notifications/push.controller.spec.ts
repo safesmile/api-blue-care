@@ -1,13 +1,13 @@
 import request from "supertest";
 import { PushController } from "../../../modules/notifications/presentation/push.controller";
-import { PushUseCase } from "../../../modules/notifications/application/push.usecase";
+import { PushUseCase } from "../../helpers/usecases/PushUseCase";
 import { controllerApp } from "../../helpers/controller-app";
 import { userFixture } from "../../helpers/identity.fixture";
 describe("PushController", () => {
   it("accepts write-only device tokens for the current identity and bounded listing", async () => {
     const service = { register: jest.fn(), list: jest.fn(), remove: jest.fn() },
       actor = userFixture().toView(),
-      app = await controllerApp(PushController, [{ provide: PushUseCase, useValue: service }], actor),
+      app = await controllerApp(PushController, [...PushUseCase.providers(service)], actor),
       id = "ba50a6d7-3ec5-4fb0-9145-2febbfaf8de8",
       input = { token: "opaque-device-token-example", platform: "web" };
     try {

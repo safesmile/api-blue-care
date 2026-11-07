@@ -12,7 +12,8 @@ export class BcryptPasswordHasher extends PasswordHasher {
    * @returns Result of the completed operation.
    */
   hash(password: string) {
-    if (Buffer.byteLength(password, "utf8") > 72) throw new BadRequestException("Password exceeds 72 bytes");
+    if (Buffer.byteLength(password, "utf8") > 72)
+      throw new BadRequestException("La contraseña supera el límite de 72 bytes");
     return bcrypt.hash(password, 12);
   }
   /**

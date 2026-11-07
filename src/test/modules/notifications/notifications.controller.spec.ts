@@ -1,6 +1,6 @@
 import request from "supertest";
 import { NotificationsController } from "../../../modules/notifications/presentation/notifications.controller";
-import { NotificationsUseCase } from "../../../modules/notifications/application/notifications.usecase";
+import { NotificationsUseCase } from "../../helpers/usecases/NotificationsUseCase";
 import { controllerApp } from "../../helpers/controller-app";
 import { userFixture } from "../../helpers/identity.fixture";
 describe("NotificationsController", () => {
@@ -8,11 +8,7 @@ describe("NotificationsController", () => {
   const owner = userFixture().toView();
   let app: Awaited<ReturnType<typeof controllerApp>>;
   beforeAll(async () => {
-    app = await controllerApp(
-      NotificationsController,
-      [{ provide: NotificationsUseCase, useValue: notifications }],
-      owner
-    );
+    app = await controllerApp(NotificationsController, [...NotificationsUseCase.providers(notifications)], owner);
   });
   afterAll(async () => {
     await app.close();

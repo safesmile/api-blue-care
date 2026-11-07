@@ -1,3 +1,4 @@
+import { ApiExceptionFilter } from "./shared/presentation/api-exception.filter";
 import { PreventionModule } from "./modules/prevention/prevention.module";
 import { DashboardModule } from "./modules/dashboard/dashboard.module";
 import { AuditModule } from "./modules/audit/audit.module";
@@ -8,7 +9,7 @@ import { ClinicsModule } from "./modules/clinics/clinics.module";
 import { PatientsModule } from "./modules/patients/patients.module";
 import { NotificationsModule } from "./modules/notifications/notifications.module";
 import { Module } from "@nestjs/common";
-import { APP_GUARD } from "@nestjs/core";
+import { APP_GUARD, APP_FILTER } from "@nestjs/core";
 import { ConfigModule, ConfigService } from "@nestjs/config";
 import { SequelizeModule } from "@nestjs/sequelize";
 import { ThrottlerGuard, ThrottlerModule } from "@nestjs/throttler";
@@ -53,6 +54,9 @@ import { AppController } from "./app.controller";
     DashboardModule
   ],
   controllers: [AppController],
-  providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }]
+  providers: [
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
+    { provide: APP_FILTER, useClass: ApiExceptionFilter }
+  ]
 })
 export class AppModule {}

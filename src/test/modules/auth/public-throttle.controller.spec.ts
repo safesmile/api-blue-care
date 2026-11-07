@@ -1,14 +1,15 @@
+import { ApiValidationPipe } from "../../../shared/presentation/api-validation.pipe";
 import { InvitationsController } from "../../../modules/auth/presentation/invitations.controller";
-import { InvitationsUseCase } from "../../../modules/auth/application/invitations.usecase";
-import { type INestApplication, ValidationPipe } from "@nestjs/common";
+import { InvitationsUseCase } from "../../helpers/usecases/InvitationsUseCase";
+import { type INestApplication } from "@nestjs/common";
 import { APP_GUARD } from "@nestjs/core";
 import { Test } from "@nestjs/testing";
 import { ThrottlerGuard, ThrottlerModule } from "@nestjs/throttler";
 import request from "supertest";
 import { AuthController } from "../../../modules/auth/presentation/auth.controller";
 import { AccountActionsController } from "../../../modules/auth/presentation/account-actions.controller";
-import { AuthUseCase } from "../../../modules/auth/application/auth.usecase";
-import { AccountActionsUseCase } from "../../../modules/auth/application/account-actions.usecase";
+import { AuthUseCase } from "../../helpers/usecases/AuthUseCase";
+import { AccountActionsUseCase } from "../../helpers/usecases/AccountActionsUseCase";
 import { PUBLIC_USE_CASES } from "../../../modules/auth/presentation/auth.throttle";
 describe("Public endpoint throttling", () => {
   let app: INestApplication;
@@ -17,22 +18,19 @@ describe("Public endpoint throttling", () => {
       imports: [ThrottlerModule.forRoot([{ ttl: 60000, limit: 60 }])],
       controllers: [AuthController, AccountActionsController, InvitationsController],
       providers: [
-        { provide: InvitationsUseCase, useValue: { accept: jest.fn(), preview: jest.fn() } },
+        ...InvitationsUseCase.providers({ accept: jest.fn(), preview: jest.fn() }),
         { provide: APP_GUARD, useClass: ThrottlerGuard },
-        { provide: AuthUseCase, useValue: { login: jest.fn(), refresh: jest.fn(), logout: jest.fn() } },
-        {
-          provide: AccountActionsUseCase,
-          useValue: {
-            forgotPassword: jest.fn(),
-            requestActivation: jest.fn(),
-            redeem: jest.fn(),
-            confirmEmail: jest.fn()
-          }
-        }
+        ...AuthUseCase.providers({ login: jest.fn(), refresh: jest.fn(), logout: jest.fn() }),
+        ...AccountActionsUseCase.providers({
+          forgotPassword: jest.fn(),
+          requestActivation: jest.fn(),
+          redeem: jest.fn(),
+          confirmEmail: jest.fn()
+        })
       ]
     }).compile();
     app = module.createNestApplication();
-    app.useGlobalPipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }));
+    app.useGlobalPipes(new ApiValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }));
     await app.init();
   });
   afterAll(async () => {

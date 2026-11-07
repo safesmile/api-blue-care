@@ -21,5 +21,6 @@ export abstract class RolesRepository {
   abstract update(id: string, input: RoleInput, actor: AccessActor): Promise<RoleView>;
   abstract delete(id: string, actor: AccessActor): Promise<void>;
   abstract catalog(): Promise<PermissionDefinition[]>;
+  abstract clinicAssignable(clinicId: string, actor: AccessActor): Promise<RoleView[]>;
   abstract authorizeAssignment(names: string[], actor: AccessActor): Promise<void>;
 }

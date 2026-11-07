@@ -1,7 +1,7 @@
-import { PushUseCase } from "../src/modules/notifications/application/push.usecase";
+import { DrainPushUseCase } from "../src/modules/notifications/application/drainPush.usecase";
 import { loadSecrets } from "../src/infrastructure/config/load-secrets";
 import { NestFactory } from "@nestjs/core";
-import { NotificationsUseCase } from "../src/modules/notifications/application/notifications.usecase";
+import { DrainNotificationUseCase } from "../src/modules/notifications/application/drainNotification.usecase";
 /** Explicit local worker: process one bounded batch, without starting an HTTP listener. */
 async function main() {
   await loadSecrets();
@@ -9,7 +9,10 @@ async function main() {
   const { AppModule } = require("../src/app.module") as typeof import("../src/app.module");
   const app = await NestFactory.createApplicationContext(AppModule, { logger: ["warn", "error"] });
   try {
-    console.info({ email: await app.get(NotificationsUseCase).drain(), push: await app.get(PushUseCase).drain() });
+    console.info({
+      email: await app.get(DrainNotificationUseCase).execute(),
+      push: await app.get(DrainPushUseCase).execute()
+    });
   } finally {
     await app.close();
   }

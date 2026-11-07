@@ -34,7 +34,11 @@ Ambos comandos usan la conexión configurada en el entorno o en .env. El reinici
 
 Las tres cuentas están habilitadas y verificadas. Su contraseña de prueba es `Pa$$word123`, guardada como hash bcrypt con una sal diferente por usuario. Los roles se asignan mediante user_roles, sin columnas de permisos directos.
 
-El seeder utiliza identificadores reservados: repetirlo restaura esas tres cuentas, contraseñas y roles sin duplicarlas, y revoca sus sesiones anteriores. Si el email o el identificador pertenece a otra cuenta, se detiene sin sobrescribirla. La reversión del seeder elimina únicamente sus tres cuentas, conserva los roles y no modifica otros usuarios.
+El seeder también crea **Clínica Blue Care de prueba** (`blue-care-test`, UUID `00000000-0000-4000-8000-000000000101`) y asigna las cuentas de prueba superadmin/admin mediante clinic_staff, staff_profiles y un rol admin local. superadmin conserva su rol global; nunca se asigna superadmin por sede. La cuenta customer no recibe asignaciones de personal. Los permisos de admin siguen siendo los del catálogo; este seeder no inventa una matriz clínica nueva.
+
+El seeder utiliza identificadores reservados: repetirlo restaura esas tres cuentas, contraseñas y roles globales sin duplicarlas, y revoca sus sesiones anteriores. Crea la clínica y las asignaciones solo si faltan; conserva otras asignaciones por clínica y no sobrescribe los datos de una clínica existente con el mismo ID/código. Si el email/identificador de usuario o el código/identificador de clínica colisionan con otro registro, se detiene sin sobrescribirlo y revierte la creación de fixtures. La reversión elimina sus tres cuentas y retira la clínica únicamente si no tiene referencias de otros registros; conserva los roles y no elimina otros usuarios. No emite correos, push ni notificaciones operativas: son fixtures explícitos de desarrollo/pruebas.
+
+Después de ejecutar `npm run db:seed`, iniciar sesión de nuevo. Las dos cuentas de personal verán la clínica real en el selector superior y en su perfil.
 
 ## Servicios locales con Docker
 
@@ -236,3 +240,14 @@ Backend del paso 7: eventos preventivos y línea temporal, intervalos por pacien
 ### Diseño de correos
 
 Cuentas y notificaciones usan un diseño HTML compartido, con texto alternativo y contenido específico por acción. [Arquitectura, configuración y vistas previas](docs/email-templates.md). Generar ejemplos sin enviar con `npm run emails:preview`. EMAIL_APP_NAME, EMAIL_PRIMARY_COLOR, EMAIL_LOGO_URL y EMAIL_SUPPORT_EMAIL son opcionales; el color se escribe entre comillas en .env. No requiere migración.
+
+### Roles por clínica y selección en sesión
+
+La autorización actual usa roles por clínica y clinicId firmado en JWT/sesión; null significa Todas las asignadas. [Contratos y cambios para frontend](docs/clinic-context.md). Login acepta clinicId; auth/switch-clinic rota ambos tokens; login/refresh/me incluyen clínicas y permisos actuales. PUT staff exige roles y las invitaciones clinicAssignments explícito. Asignaciones generan avisos durables. Migraciones existentes modificadas por autorización para reconstruir datos ficticios; no aplicar un simple migrate esperando convertir esquemas anteriores.
+
+## Colaboradores y pacientes
+
+Los flujos específicos y su frontend de páginas completas están documentados en [Gestión de colaboradores y pacientes](docs/people-management.md). Invitar colaboradores exige clínica/rol local permitido y fija una identidad básica staff; invitar pacientes fija customer y registra su ficha en la clínica actual, sin otorgar acceso de personal. Si está en Todas debe seleccionar una clínica. La nueva interfaz ya no usa el formulario genérico de roles/checkbox ni mezcla pacientes en el directorio del personal. El historial admite kind para separar resultados antes de paginar. El catálogo incorpora staff protegido sin cambiar las tres cuentas del seeder.
+
+
+Arquitectura de casos de uso: [CRUD, políticas y operaciones separadas](docs/application-architecture.md). Incluye las bases abstractas, los nuevos imports internos y el contrato de errores en español.

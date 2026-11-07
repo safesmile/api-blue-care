@@ -1,8 +1,26 @@
+import { PermissionCode } from "../../../shared/domain/permission-code";
 import type { Permission } from "../../../shared/domain/permission";
+export const PERSONAL_PERMISSION_CODES: readonly string[] = [
+  PermissionCode.AuthMe,
+  PermissionCode.AuthPasswordChange,
+  PermissionCode.AuthEmailChange,
+  PermissionCode.NotificationsInbox,
+  PermissionCode.NotificationsRead,
+  PermissionCode.NotificationsDevices,
+  PermissionCode.PatientsSelf,
+  PermissionCode.PlansCatalog,
+  PermissionCode.MembershipsSelf,
+  PermissionCode.BenefitsSelf,
+  PermissionCode.PreventionSelf
+];
 export interface AccessActor {
   id: string;
   roles: readonly string[];
   permissions: readonly Permission[];
+  clinicId?: string | null;
+  clinicPermission?: Permission;
+  globalPermissions?: readonly Permission[];
+  globalRoles?: readonly string[];
 }
 /**
  * Pure policies shared by HTTP use cases and transactional persistence adapters.
@@ -25,7 +43,10 @@ export class AccessPolicy {
    * @returns Result of the completed operation.
    */
   static identity(actor: AccessActor | undefined, permission: Permission, targetId?: string) {
-    return this.allows(actor, permission) && (!!actor?.permissions.includes("users:manage") || targetId === actor?.id);
+    return (
+      this.allows(actor, permission) &&
+      (!!actor?.permissions.includes(PermissionCode.UsersManage) || targetId === actor?.id)
+    );
   }
   /**
    *

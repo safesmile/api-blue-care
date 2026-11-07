@@ -1,27 +1,28 @@
+import { ApiValidationPipe } from "../../shared/presentation/api-validation.pipe";
+import { assignClinicOperator } from "../helpers/clinic-operator.fixture";
 import { PreventionRepository } from "../../modules/prevention/domain/prevention.repository";
 import { Test } from "@nestjs/testing";
-import { ValidationPipe } from "@nestjs/common";
 import { Sequelize } from "sequelize-typescript";
 import { QueryTypes } from "sequelize";
 import { randomUUID } from "node:crypto";
 import request from "supertest";
 import { AppModule } from "../../app.module";
 import { createSuperUser } from "../../../scripts/lib/super-user";
-import { AuthUseCase } from "../../modules/auth/application/auth.usecase";
-import { AccountActionsUseCase } from "../../modules/auth/application/account-actions.usecase";
+import { AuthUseCase } from "../helpers/usecases/AuthUseCase";
+import { AccountActionsUseCase } from "../helpers/usecases/AccountActionsUseCase";
 import { AccountMailer } from "../../modules/auth/domain/account-actions.repository";
 import { EmailSender } from "../../shared/domain/email-sender";
 import { PushSender, PushRepository, type PushDelivery } from "../../modules/notifications/domain/push.repository";
-import { PushUseCase } from "../../modules/notifications/application/push.usecase";
-import { NotificationsUseCase } from "../../modules/notifications/application/notifications.usecase";
-import { PreventionUseCase } from "../../modules/prevention/application/prevention.usecase";
+import { PushUseCase } from "../helpers/usecases/PushUseCase";
+import { NotificationsUseCase } from "../helpers/usecases/NotificationsUseCase";
+import { PreventionUseCase } from "../helpers/usecases/PreventionUseCase";
 import { SqlPreventionRepository } from "../../modules/prevention/infrastructure/sql-prevention.repository";
 import {
   MembershipGateway,
   MembershipBilling,
   type VerifiedPayment
 } from "../../modules/memberships/domain/membership-billing";
-import { MembershipsUseCase } from "../../modules/memberships/application/memberships.usecase";
+import { MembershipsUseCase } from "../helpers/usecases/MembershipsUseCase";
 describe("Prevention, reminders, push and dashboard (disposable PostgreSQL)", () => {
   let app, db: Sequelize, rootToken: string, clinicA, clinicB, owner, other, staffA, staffB, type, event, device;
   const mail: any[] = [],
@@ -53,11 +54,13 @@ describe("Prevention, reminders, push and dashboard (disposable PostgreSQL)", ()
         .send({ email, firstName: "Preventive", lastName: "User", password: "Abcd123!", roles })
         .expect(201)
     ).body;
-    await app.get(AccountActionsUseCase).requestActivation(email);
-    await app
-      .get(AccountActionsUseCase)
-      .redeem("activate", mail.findLast(entry => entry.email === email).token, "Abcd123!");
-    return { user, token: (await app.get(AuthUseCase).login(email, "Abcd123!")).token };
+    await AccountActionsUseCase.resolve(app).requestActivation(email);
+    await AccountActionsUseCase.resolve(app).redeem(
+      "activate",
+      mail.findLast(entry => entry.email === email).token,
+      "Abcd123!"
+    );
+    return { user, token: (await AuthUseCase.resolve(app).login(email, "Abcd123!")).token };
   };
   const create = (extra: Record<string, unknown> = {}) =>
     api()
@@ -95,7 +98,7 @@ describe("Prevention, reminders, push and dashboard (disposable PostgreSQL)", ()
       .useValue(gateway)
       .compile();
     app = module.createNestApplication();
-    app.useGlobalPipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }));
+    app.useGlobalPipes(new ApiValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }));
     await app.listen(0, "127.0.0.1");
     db = app.get(Sequelize);
     await createSuperUser(db, {
@@ -104,9 +107,11 @@ describe("Prevention, reminders, push and dashboard (disposable PostgreSQL)", ()
       email: "prevention-root@blue.test",
       password: "Abcd123!"
     });
-    rootToken = (await app.get(AuthUseCase).login("prevention-root@blue.test", "Abcd123!")).token;
+    rootToken = (await AuthUseCase.resolve(app).login("prevention-root@blue.test", "Abcd123!")).token;
     clinicA = (await api().post("/clinics").send({ code: "preventive-a", name: "Preventive A" }).expect(201)).body;
+    await assignClinicOperator(app, rootToken, clinicA.id);
     clinicB = (await api().post("/clinics").send({ code: "preventive-b", name: "Preventive B" }).expect(201)).body;
+    await assignClinicOperator(app, rootToken, clinicB.id);
     await api()
       .post("/roles")
       .send({
@@ -126,9 +131,11 @@ describe("Prevention, reminders, push and dashboard (disposable PostgreSQL)", ()
     staffB = await account("preventive-staff-b@blue.test", ["preventive-scoped"]);
     await api()
       .put("/clinics/" + clinicA.id + "/staff/" + staffA.user.id)
+      .send({ roles: ["customer"] })
       .expect(204);
     await api()
       .put("/clinics/" + clinicB.id + "/staff/" + staffB.user.id)
+      .send({ roles: ["customer"] })
       .expect(204);
     owner = await account("preventive-owner@blue.test", ["customer"]);
     other = await account("preventive-other@blue.test", ["customer"]);
@@ -214,7 +221,7 @@ describe("Prevention, reminders, push and dashboard (disposable PostgreSQL)", ()
   });
   it("deduplicates concurrent reminder sweeps and creates inbox, email and push atomically", async () => {
     await due(event.id);
-    const results = await Promise.all([app.get(PreventionUseCase).drain(), app.get(PreventionUseCase).drain()]);
+    const results = await Promise.all([PreventionUseCase.resolve(app).drain(), PreventionUseCase.resolve(app).drain()]);
     expect(results.reduce((n, r) => n + r.generated, 0)).toBe(1);
     const [row] = await db.query<{ notificationId: string }>(
       'SELECT "notificationId" FROM preventive_reminders WHERE "eventId"=:id AND hours=168',
@@ -307,7 +314,7 @@ describe("Prevention, reminders, push and dashboard (disposable PostgreSQL)", ()
       .spyOn(app.get(PreventionRepository) as SqlPreventionRepository, "now")
       .mockResolvedValue(new Date(Date.now() + 12 * 86400000));
     try {
-      expect((await app.get(PreventionUseCase).drain()).generated).toBe(0);
+      expect((await PreventionUseCase.resolve(app).drain()).generated).toBe(0);
     } finally {
       clock.mockRestore();
     }
@@ -324,7 +331,7 @@ describe("Prevention, reminders, push and dashboard (disposable PostgreSQL)", ()
       IF NEW.action='prevention.reminder-generated' THEN RAISE EXCEPTION 'test'; END IF; RETURN NEW; END; $$;
     CREATE TRIGGER prevention_test_failure BEFORE INSERT ON audit_events FOR EACH ROW EXECUTE FUNCTION prevention_test_failure()`);
     try {
-      await expect(app.get(PreventionUseCase).drain()).rejects.toThrow("rolled back");
+      await expect(PreventionUseCase.resolve(app).drain()).rejects.toThrow("rolled back");
     } finally {
       await db.query("DROP TRIGGER prevention_test_failure ON audit_events; DROP FUNCTION prevention_test_failure()");
     }
@@ -333,7 +340,7 @@ describe("Prevention, reminders, push and dashboard (disposable PostgreSQL)", ()
       { replacements: { id: value.id }, type: QueryTypes.SELECT }
     );
     expect(row).toEqual({ status: "pending", notificationId: null });
-    expect((await app.get(PreventionUseCase).drain()).generated).toBe(1);
+    expect((await PreventionUseCase.resolve(app).drain()).generated).toBe(1);
   });
   it("uses per-device leases, rejects stale results, disables invalid tokens and honors revocation", async () => {
     const push: PushRepository = app.get(PushRepository);
@@ -359,7 +366,7 @@ describe("Prevention, reminders, push and dashboard (disposable PostgreSQL)", ()
       replacements: { id }
     });
     pushSend.mockResolvedValueOnce("invalid");
-    await app.get(PushUseCase).drain();
+    await PushUseCase.resolve(app).drain();
     const [disabled] = await db.query<{ enabled: boolean }>("SELECT enabled FROM push_devices WHERE id=:id", {
       replacements: { id: device.id },
       type: QueryTypes.SELECT
@@ -412,7 +419,7 @@ describe("Prevention, reminders, push and dashboard (disposable PostgreSQL)", ()
     await app
       .get(MembershipBilling)
       .receive({ id: "msg_" + paymentId, resourceId: paymentId, eventType: "intent.succeeded" });
-    await app.get(MembershipsUseCase).drain();
+    await MembershipsUseCase.resolve(app).drain();
     const metrics = (
       await api(staffA.token)
         .get("/dashboard?days=60&clinicId=" + clinicA.id)
@@ -457,7 +464,7 @@ describe("Prevention, reminders, push and dashboard (disposable PostgreSQL)", ()
     await expect(db.query("TRUNCATE preventive_events CASCADE")).rejects.toThrow();
     await api().post("/internal/jobs/prevention/dispatch").expect(401);
     expect(send).not.toHaveBeenCalled();
-    const notifications = app.get(NotificationsUseCase);
+    const notifications = NotificationsUseCase.resolve(app);
     await notifications.drain();
     expect(send).toHaveBeenCalled();
   });

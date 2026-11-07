@@ -1,20 +1,22 @@
+import { CrudEntityController } from "../../../shared/presentation/crud.controller";
 import { AuditReasonDto } from "../../../shared/presentation/audit-reason.dto";
 import { AUTHORIZATION_PERMISSIONS } from "../domain/authorization.permissions";
 import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Put, Post, Query, Req } from "@nestjs/common";
-import { RolesUseCase } from "../application/roles.usecase";
+import { CrudRolesUseCase } from "../application/crudRoles.usecase";
 import { RoleDto } from "./role.dto";
 import { Permissions } from "../../auth/presentation/auth.decorators";
 import type { AuthRequest } from "../../auth/presentation/auth.guard";
 import { PaginationDto } from "../../identity/presentation/user.dto";
 /** Explicit administrative role endpoints, each with an operation permission. */
 @Controller("roles")
-export class RolesController {
+export class RolesController extends CrudEntityController<CrudRolesUseCase> {
   /**
-   *
-   * @param roles Role definitions or assigned role names.
-   * @returns Result of the completed operation.
+   * Recibe las dependencias de la operación.
+   * @param roles Dependencia tipada de roles.
    */
-  constructor(private readonly roles: RolesUseCase) {}
+  constructor(roles: CrudRolesUseCase) {
+    super(roles);
+  }
   /**
    *
    * @param page Bounded pagination settings.
@@ -25,7 +27,7 @@ export class RolesController {
     @Query() page: PaginationDto,
     @Req() req: AuthRequest
   ) {
-    return this.roles.list(page, req.user);
+    return this.crud("list", page, req.user);
   }
   /**
    *
@@ -37,7 +39,7 @@ export class RolesController {
     @Param("id", ParseUUIDPipe) id: string,
     @Req() req: AuthRequest
   ) {
-    return this.roles.read(id, req.user);
+    return this.crud("read", id, req.user);
   }
   /**
    *
@@ -49,7 +51,7 @@ export class RolesController {
     @Body() input: RoleDto,
     @Req() req: AuthRequest
   ) {
-    return this.roles.create(input, req.user);
+    return this.crud("create", input, req.user);
   }
   /**
    *
@@ -63,7 +65,7 @@ export class RolesController {
     @Body() input: RoleDto,
     @Req() req: AuthRequest
   ) {
-    return this.roles.update(id, input, req.user);
+    return this.crud("update", id, input, req.user);
   }
   /**
    *
@@ -78,6 +80,6 @@ export class RolesController {
     @Body() _input: AuditReasonDto = {}
   ) {
     void _input; // The validated body supplies only the optional audit reason.
-    return this.roles.delete(id, req.user);
+    return this.crud("delete", id, req.user);
   }
 }

@@ -1,6 +1,6 @@
 import { ConfigService } from "@nestjs/config";
 import { ForbiddenException, NotFoundException } from "@nestjs/common";
-import { PushUseCase } from "../../../modules/notifications/application/push.usecase";
+import { PushUseCase } from "../../helpers/usecases/PushUseCase";
 import { userFixture } from "../../helpers/identity.fixture";
 describe("PushUseCase", () => {
   const repository = {

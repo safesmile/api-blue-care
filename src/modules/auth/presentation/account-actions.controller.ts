@@ -1,6 +1,11 @@
 import { Body, Controller, HttpCode, Post, Req } from "@nestjs/common";
 import { Throttle } from "@nestjs/throttler";
-import { AccountActionsUseCase } from "../application/account-actions.usecase";
+import { ForgotPasswordAccountUseCase } from "../application/forgotPasswordAccount.usecase";
+import { RequestActivationAccountUseCase } from "../application/requestActivationAccount.usecase";
+import { RedeemAccountUseCase } from "../application/redeemAccount.usecase";
+import { ChangePasswordAccountUseCase } from "../application/changePasswordAccount.usecase";
+import { RequestEmailChangeAccountUseCase } from "../application/requestEmailChangeAccount.usecase";
+import { ConfirmEmailAccountUseCase } from "../application/confirmEmailAccount.usecase";
 import { AUTH_PERMISSIONS } from "../domain/auth.permissions";
 import { Permissions, Public } from "./auth.decorators";
 import { PUBLIC_USE_CASES } from "./auth.throttle";
@@ -12,10 +17,22 @@ import { EmailDto, RedeemDto, TokenDto, ChangePasswordDto, ChangeEmailDto } from
 @Controller("auth")
 export class AccountActionsController {
   /**
-   * Receives the dependencies required by this component.
-   * @param actions Account action repository or application service.
+   * Recibe las dependencias de la operación.
+   * @param forgotPasswordAccount Dependencia tipada de forgotPasswordAccount.
+   * @param requestActivationAccount Dependencia tipada de requestActivationAccount.
+   * @param redeemAccount Dependencia tipada de redeemAccount.
+   * @param changePasswordAccount Dependencia tipada de changePasswordAccount.
+   * @param requestEmailChangeAccount Dependencia tipada de requestEmailChangeAccount.
+   * @param confirmEmailAccount Dependencia tipada de confirmEmailAccount.
    */
-  constructor(private readonly actions: AccountActionsUseCase) {}
+  constructor(
+    private readonly forgotPasswordAccount: ForgotPasswordAccountUseCase,
+    private readonly requestActivationAccount: RequestActivationAccountUseCase,
+    private readonly redeemAccount: RedeemAccountUseCase,
+    private readonly changePasswordAccount: ChangePasswordAccountUseCase,
+    private readonly requestEmailChangeAccount: RequestEmailChangeAccountUseCase,
+    private readonly confirmEmailAccount: ConfirmEmailAccountUseCase
+  ) {}
   /**
    * Acknowledges a password recovery request.
    * @param input Validated input for this operation.
@@ -26,7 +43,7 @@ export class AccountActionsController {
   @HttpCode(202)
   @Throttle({ default: PUBLIC_USE_CASES.forgotPassword })
   async forgot(@Body() input: EmailDto) {
-    await this.actions.forgotPassword(input.email);
+    await this.forgotPasswordAccount.execute(input.email);
     return { message: "If the account is eligible, a verification email will be sent" };
   }
   /**
@@ -37,7 +54,7 @@ export class AccountActionsController {
   @Public() @Post("password/reset") @HttpCode(204) @Throttle({ default: PUBLIC_USE_CASES.resetPassword }) reset(
     @Body() input: RedeemDto
   ) {
-    return this.actions.redeem("reset", input.token, input.password);
+    return this.redeemAccount.execute("reset", input.token, input.password);
   }
   /**
    * Acknowledges activation without disclosing account existence.
@@ -49,7 +66,7 @@ export class AccountActionsController {
   @HttpCode(202)
   @Throttle({ default: PUBLIC_USE_CASES.activation })
   async activation(@Body() input: EmailDto) {
-    await this.actions.requestActivation(input.email);
+    await this.requestActivationAccount.execute(input.email);
     return { message: "If the account is eligible, a verification email will be sent" };
   }
   /**
@@ -60,7 +77,7 @@ export class AccountActionsController {
   @Public() @Post("activation/confirm") @HttpCode(204) @Throttle({ default: PUBLIC_USE_CASES.activation }) activate(
     @Body() input: RedeemDto
   ) {
-    return this.actions.redeem("activate", input.token, input.password);
+    return this.redeemAccount.execute("activate", input.token, input.password);
   }
   /**
    * Changes the authenticated account credentials and revokes its sessions.
@@ -73,7 +90,7 @@ export class AccountActionsController {
   @Permissions(AUTH_PERMISSIONS.changePassword.shortcode)
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   changePassword(@Body() input: ChangePasswordDto, @Req() request: AuthRequest) {
-    return this.actions.changePassword(request.user.id, input.currentPassword, input.newPassword);
+    return this.changePasswordAccount.execute(request.user.id, input.currentPassword, input.newPassword);
   }
   /**
    * Requests verification of the authenticated account's new contact.
@@ -86,7 +103,7 @@ export class AccountActionsController {
   @Permissions(AUTH_PERMISSIONS.changeEmail.shortcode)
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   async changeEmail(@Body() input: ChangeEmailDto, @Req() request: AuthRequest) {
-    await this.actions.requestEmailChange(request.user.id, input.email, input.currentPassword);
+    await this.requestEmailChangeAccount.execute(request.user.id, input.email, input.currentPassword);
     return { message: "Verification sent to the new email" };
   }
   /**
@@ -97,6 +114,6 @@ export class AccountActionsController {
   @Public() @Post("email/confirm") @HttpCode(204) @Throttle({ default: PUBLIC_USE_CASES.activation }) confirmEmail(
     @Body() input: TokenDto
   ) {
-    return this.actions.confirmEmail(input.token);
+    return this.confirmEmailAccount.execute(input.token);
   }
 }

@@ -1,42 +1,43 @@
+import { PermissionCode } from "../../../shared/domain/permission-code";
 export const PLANS_PERMISSION_DEFINITIONS = [
   {
-    shortcode: "plans:create",
+    shortcode: PermissionCode.PlansCreate,
     scope: "plans.create",
     group: "plans",
     description: "create plans with explicit operation authority"
   },
   {
-    shortcode: "plans:read",
+    shortcode: PermissionCode.PlansRead,
     scope: "plans.read",
     group: "plans",
     description: "read plans with explicit operation authority"
   },
   {
-    shortcode: "plans:list",
+    shortcode: PermissionCode.PlansList,
     scope: "plans.list",
     group: "plans",
     description: "list plans with explicit operation authority"
   },
   {
-    shortcode: "plans:version",
+    shortcode: PermissionCode.PlansVersion,
     scope: "plans.version",
     group: "plans",
     description: "version plans with explicit operation authority"
   },
   {
-    shortcode: "plans:publish",
+    shortcode: PermissionCode.PlansPublish,
     scope: "plans.publish",
     group: "plans",
     description: "publish plans with explicit operation authority"
   },
   {
-    shortcode: "plans:update",
+    shortcode: PermissionCode.PlansUpdate,
     scope: "plans.update",
     group: "plans",
     description: "update plans with explicit operation authority"
   },
   {
-    shortcode: "plans:catalog",
+    shortcode: PermissionCode.PlansCatalog,
     scope: "plans.catalog",
     group: "plans",
     description: "Read published plans available for contracting"

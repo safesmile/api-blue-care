@@ -9,6 +9,8 @@ export class SessionModel extends Model {
   @ForeignKey(() => UserModel)
   @Column({ type: DataType.UUID, allowNull: false })
   declare userId: string;
+  @Column({ type: DataType.STRING(10), allowNull: false }) declare mode: "patient" | "staff";
+  @Column({ type: DataType.UUID, allowNull: true }) declare clinicId: string | null;
   @Column({ type: DataType.STRING(64), unique: true, allowNull: false })
   declare tokenHash: string;
   @Column({ type: DataType.DATE, allowNull: false }) declare expiresAt: Date;

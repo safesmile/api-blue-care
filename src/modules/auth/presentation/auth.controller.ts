@@ -1,10 +1,12 @@
 import { AUTH_PERMISSIONS } from "../domain/auth.permissions";
 import { Throttle } from "@nestjs/throttler";
 import { PUBLIC_USE_CASES } from "./auth.throttle";
-import { Body, Controller, Get, HttpCode, Post, Req } from "@nestjs/common";
-import { AuthUseCase } from "../application/auth.usecase";
+import { ForbiddenException, Body, Controller, Get, HttpCode, Post, Req } from "@nestjs/common";
+import { LoginSessionUseCase } from "../application/loginSession.usecase";
+import { RefreshSessionUseCase } from "../application/refreshSession.usecase";
+import { LogoutSessionUseCase } from "../application/logoutSession.usecase";
 import { Public, Permissions } from "./auth.decorators";
-import { LoginDto, RefreshDto } from "./auth.dto";
+import { LoginDto, RefreshDto, SwitchClinicDto } from "./auth.dto";
 import type { AuthRequest } from "./auth.guard";
 /**
  * Exposes authentication endpoints with explicit HTTP contracts.
@@ -12,10 +14,16 @@ import type { AuthRequest } from "./auth.guard";
 @Controller("auth")
 export class AuthController {
   /**
-   * Receives the dependencies required by this component.
-   * @param auth Value required by this operation.
+   * Recibe las dependencias de la operación.
+   * @param loginSession Dependencia tipada de loginSession.
+   * @param refreshSession Dependencia tipada de refreshSession.
+   * @param logoutSession Dependencia tipada de logoutSession.
    */
-  constructor(private readonly auth: AuthUseCase) {}
+  constructor(
+    private readonly loginSession: LoginSessionUseCase,
+    private readonly refreshSession: RefreshSessionUseCase,
+    private readonly logoutSession: LogoutSessionUseCase
+  ) {}
   /**
    * Validates credentials and creates a persisted session.
    * @param input Validated input for this operation.
@@ -24,7 +32,7 @@ export class AuthController {
   @Public() @Post("login") @Throttle({ default: PUBLIC_USE_CASES.login }) @HttpCode(200) login(
     @Body() input: LoginDto
   ) {
-    return this.auth.login(input.email, input.password);
+    return this.loginSession.execute(input.email, input.password, input.clinicId ?? null);
   }
   /**
    * Consumes a refresh token and returns its replacement credentials.
@@ -34,7 +42,7 @@ export class AuthController {
   @Public() @Post("refresh") @Throttle({ default: PUBLIC_USE_CASES.refresh }) @HttpCode(200) refresh(
     @Body() input: RefreshDto
   ) {
-    return this.auth.refresh(input.refreshToken);
+    return this.refreshSession.execute(input.refreshToken);
   }
   /**
    * Revokes the session identified by a refresh token.
@@ -44,7 +52,20 @@ export class AuthController {
   @Public() @Post("logout") @Throttle({ default: PUBLIC_USE_CASES.logout }) @HttpCode(204) logout(
     @Body() input: RefreshDto
   ) {
-    return this.auth.logout(input.refreshToken);
+    return this.logoutSession.execute(input.refreshToken);
+  }
+  /**
+   * Rotates both credentials while preserving the absolute session deadline.
+   * @param input Current refresh credential and target clinic selection.
+   * @param request Authenticated session owner.
+   * @returns Credentials for the selected clinic context.
+   */
+  @Post("switch-clinic")
+  @HttpCode(200)
+  @Permissions(AUTH_PERMISSIONS.me.shortcode)
+  switchClinic(@Body() input: SwitchClinicDto, @Req() request: AuthRequest) {
+    if (request.user.mode !== "staff") throw new ForbiddenException("Solo el personal puede seleccionar una clínica");
+    return this.refreshSession.execute(input.refreshToken, input.clinicId, request.user.id, request.sessionId);
   }
   /**
    * Returns the profile resolved by authentication.

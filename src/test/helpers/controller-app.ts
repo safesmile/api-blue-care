@@ -1,6 +1,7 @@
+import { ApiValidationPipe } from "../../shared/presentation/api-validation.pipe";
 import type { UserView } from "../../modules/identity/domain/user";
 import type { Request, Response, NextFunction } from "express";
-import { ValidationPipe, type Provider, type Type } from "@nestjs/common";
+import { type Provider, type Type } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 /**
  * Starts an isolated controller with validated HTTP inputs.
@@ -12,7 +13,7 @@ import { Test } from "@nestjs/testing";
 export async function controllerApp(controller: Type<unknown>, providers: Provider[], user?: UserView) {
   const module = await Test.createTestingModule({ controllers: [controller], providers }).compile();
   const app = module.createNestApplication();
-  app.useGlobalPipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }));
+  app.useGlobalPipes(new ApiValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }));
   if (user)
     app.use((request: Request & { user?: UserView }, _response: Response, next: NextFunction) => {
       request.user = user;

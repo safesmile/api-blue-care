@@ -1,4 +1,7 @@
-import { ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
+import { PermissionCode } from "../../../shared/domain/permission-code";
+import { AuthorizationStore } from "../../authorization/infrastructure/authorization.store";
+import { clinicScopeParams } from "../../clinics/infrastructure/clinic-scope";
+import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import { Sequelize } from "sequelize-typescript";
 import { QueryTypes, UniqueConstraintError, type Transaction } from "sequelize";
 import { randomUUID } from "node:crypto";
@@ -18,15 +21,48 @@ import { clinicChange } from "../domain/clinic.events";
 @Injectable()
 export class SqlClinicRepository extends ClinicRepository {
   /**
-   *
-   * @param db PostgreSQL connection.
-   * @param access Current clinic assignment resolver.
+   * Recibe las dependencias de la operación.
+   * @param db Dependencia tipada de db.
+   * @param access Dependencia tipada de access.
+   * @param authorization Dependencia tipada de authorization.
    */
   constructor(
     private readonly db: Sequelize,
-    private readonly access: ClinicAccess
+    private readonly access: ClinicAccess,
+    private readonly authorization: AuthorizationStore
   ) {
     super();
+  }
+  /**
+   * Lists assignable clinic metadata without bypassing clinical record scope.
+   * @param query Bounded explicit query filters.
+   * @param actor Authenticated caller and current role grants.
+   * @returns The authorized result or completion of the operation.
+   */
+  async available(query: ClinicQuery, actor: AccessActor) {
+    const grants = actor.globalPermissions ?? actor.permissions;
+    const global = grants.includes(PermissionCode.ClinicsStaffManage) && grants.includes(PermissionCode.ClinicsAll);
+    const scope = global
+      ? "WHERE TRUE"
+      : "WHERE blue_care_clinic_allowed(:actorId,c.id,CAST(:currentClinicId AS UUID),'clinics:staff-manage')";
+    const where =
+      scope +
+      " AND (:enabled IS NULL OR c.enabled=:enabled) AND (:search IS NULL OR c.name ILIKE :search ESCAPE '!' OR c.code ILIKE :search ESCAPE '!')";
+    const replacements = {
+      ...query,
+      ...clinicScopeParams(actor),
+      enabled: query.enabled ?? true,
+      search: query.search === undefined ? null : "%" + query.search.replace(/[!%_]/g, "!$&") + "%"
+    };
+    const items = await this.db.query<ClinicView>(
+      "SELECT c.* FROM clinics c " + where + " ORDER BY c.name,c.id LIMIT :limit OFFSET :offset",
+      { replacements, type: QueryTypes.SELECT }
+    );
+    const [count] = await this.db.query<{ total: number }>("SELECT COUNT(*)::int total FROM clinics c " + where, {
+      replacements,
+      type: QueryTypes.SELECT
+    });
+    return { items, total: count.total };
   }
   /**
    * Creates an independent administrative record.
@@ -57,7 +93,7 @@ export class SqlClinicRepository extends ClinicRepository {
         return row;
       });
     } catch (error) {
-      if (error instanceof UniqueConstraintError) throw new ConflictException("Clinic code already exists");
+      if (error instanceof UniqueConstraintError) throw new ConflictException("El código de la clínica ya existe");
       throw error;
     }
   }
@@ -82,11 +118,11 @@ export class SqlClinicRepository extends ClinicRepository {
    * @returns The persisted result or completion of the authorized operation.
    */
   async list(query: ClinicQuery, actor: AccessActor) {
-    const filter = `WHERE (:all OR EXISTS(SELECT 1 FROM clinic_staff s WHERE s."clinicId"=c.id AND s."userId"=:actorId))
+    const filter = `WHERE blue_care_clinic_allowed(:actorId,c.id,CAST(:currentClinicId AS UUID),CAST(:clinicPermission AS TEXT))
       AND (:enabled IS NULL OR c.enabled=:enabled) AND (:search IS NULL OR c.name ILIKE :search ESCAPE '!' OR c.code ILIKE :search ESCAPE '!')`;
     const replacements = {
       ...query,
-      all: actor.permissions.includes("clinics:all"),
+      ...clinicScopeParams(actor),
       actorId: actor.id,
       enabled: query.enabled ?? null,
       search: query.search === undefined ? null : "%" + query.search.replace(/[!%_]/g, "!$&") + "%"
@@ -117,7 +153,7 @@ export class SqlClinicRepository extends ClinicRepository {
           transaction,
           type: QueryTypes.SELECT
         });
-        if (!before) throw new NotFoundException("Clinic not found");
+        if (!before) throw new NotFoundException("No se encontró la clínica");
         await this.access.require(id, actor, transaction);
         const next = { ...before };
         for (const field of ["code", "name", "address", "phone", "email", "enabled"] as const)
@@ -130,7 +166,7 @@ export class SqlClinicRepository extends ClinicRepository {
         return after;
       });
     } catch (error) {
-      if (error instanceof UniqueConstraintError) throw new ConflictException("Clinic code already exists");
+      if (error instanceof UniqueConstraintError) throw new ConflictException("El código de la clínica ya existe");
       throw error;
     }
   }
@@ -142,10 +178,23 @@ export class SqlClinicRepository extends ClinicRepository {
    * @returns The persisted result or completion of the authorized operation.
    */
   async staff(id: string, page: Pagination, actor: AccessActor) {
-    await this.access.require(id, actor);
+    const global = actor.globalPermissions ?? actor.permissions;
+    if (!(global.includes(PermissionCode.ClinicsStaffList) && global.includes(PermissionCode.ClinicsAll)))
+      await this.access.require(id, actor);
     const replacements = { id, ...page };
     const items = await this.db.query<ClinicStaffView>(
-      'SELECT * FROM clinic_staff WHERE "clinicId"=:id ORDER BY "userId" LIMIT :limit OFFSET :offset',
+      `SELECT s.*,u.name,u.email,COALESCE((SELECT ARRAY_AGG(r.name
+ ORDER BY r.name)
+ FROM user_roles ur
+ JOIN roles r
+ ON r.id=ur."roleId"
+ WHERE ur."userId"=s."userId"
+ AND ur."clinicId"=s."clinicId"),'{}') AS roles
+ FROM clinic_staff s
+ JOIN users u
+ ON u.id=s."userId"
+ WHERE s."clinicId"=:id
+ ORDER BY s."userId" LIMIT :limit OFFSET :offset`,
       { replacements, type: QueryTypes.SELECT }
     );
     const [count] = await this.db.query<{ total: number }>(
@@ -159,10 +208,13 @@ export class SqlClinicRepository extends ClinicRepository {
    * @param id Resource identifier.
    * @param userId Account identifier selected by the server or verified against registered contact.
    * @param actor Authenticated identity and current permissions.
+   * @param roles Role names for this clinic assignment.
    * @returns The persisted result or completion of the authorized operation.
    */
-  async assign(id: string, userId: string, actor: AccessActor) {
-    await this.assignment(id, userId, actor, true);
+  async assign(id: string, userId: string, actor: AccessActor, roles: string[]) {
+    await this.db.transaction(async transaction => {
+      await this.authorization.assignClinic(userId, { clinicId: id, roles }, actor, transaction);
+    });
   }
   /**
    * Removes a clinic assignment using explicit global authority.
@@ -172,54 +224,53 @@ export class SqlClinicRepository extends ClinicRepository {
    * @returns The persisted result or completion of the authorized operation.
    */
   async unassign(id: string, userId: string, actor: AccessActor) {
-    await this.assignment(id, userId, actor, false);
+    await this.removeAssignment(id, userId, actor);
   }
   /**
    * Changes a staff assignment and records its audit event atomically.
    * @param id Resource identifier.
    * @param userId Account identifier selected by the server or verified against registered contact.
    * @param actor Authenticated identity and current permissions.
-   * @param assign Whether to grant or remove the assignment.
    * @returns The persisted result or completion of the authorized operation.
    */
-  private async assignment(id: string, userId: string, actor: AccessActor, assign: boolean) {
-    if (!actor.permissions.includes("clinics:all") || !actor.permissions.includes("clinics:staff-manage"))
-      throw new ForbiddenException("Global staff management permission required");
+  private async removeAssignment(id: string, userId: string, actor: AccessActor) {
     await this.db.transaction(async transaction => {
-      await this.lockClinic(id, transaction);
+      const clinic = await this.lockClinic(id, transaction);
+      const globalRoles = await this.authorization.rolesFor(actor.id, transaction);
+      const grants = await this.authorization.permissionsFor(globalRoles, transaction);
+      if (!(grants.includes(PermissionCode.ClinicsStaffManage) && grants.includes(PermissionCode.ClinicsAll)))
+        await this.access.require(id, { ...actor, clinicPermission: PermissionCode.ClinicsStaffManage }, transaction);
       const [user] = await this.db.query<{ id: string }>("SELECT id FROM users WHERE id=:userId FOR KEY SHARE", {
         replacements: { userId },
         transaction,
         type: QueryTypes.SELECT
       });
-      if (!user) throw new NotFoundException("User not found");
+      if (!user) throw new NotFoundException("No se encontró el usuario");
       const [existing] = await this.db.query<ClinicStaffView>(
         'SELECT * FROM clinic_staff WHERE "clinicId"=:id AND "userId"=:userId',
         { replacements: { id, userId }, transaction, type: QueryTypes.SELECT }
       );
-      if (!!existing === assign) return;
-      const value = { clinicId: id, userId };
-      if (assign)
-        await this.db.query('INSERT INTO clinic_staff ("clinicId","userId","createdAt") VALUES (:id,:userId,NOW())', {
-          replacements: { id, userId },
-          transaction
-        });
-      else
-        await this.db.query('DELETE FROM clinic_staff WHERE "clinicId"=:id AND "userId"=:userId', {
-          replacements: { id, userId },
-          transaction
-        });
-      await recordChange(
-        this.db,
-        transaction,
-        clinicChange(
-          assign ? "clinic.staff-assigned" : "clinic.staff-unassigned",
-          id,
-          actor.id,
-          existing ?? null,
-          assign ? value : null
-        )
-      );
+      if (!existing) return;
+      await this.db.query('DELETE FROM user_roles WHERE "clinicId"=:id AND "userId"=:userId', {
+        replacements: { id, userId },
+        transaction
+      });
+      await this.db.query('DELETE FROM clinic_staff WHERE "clinicId"=:id AND "userId"=:userId', {
+        replacements: { id, userId },
+        transaction
+      });
+      await recordChange(this.db, transaction, {
+        ...clinicChange("clinic.staff-unassigned", id, actor.id, existing, null),
+        notifications: [
+          {
+            userId,
+            title: "Se retiró tu acceso a una clínica",
+            body: "Se retiró tu acceso a " + clinic.name + ". Actualiza tus clínicas disponibles en Blue Care.",
+            email: true,
+            push: true
+          }
+        ]
+      });
     });
   }
   /**
@@ -229,11 +280,15 @@ export class SqlClinicRepository extends ClinicRepository {
    * @returns The persisted result or completion of the authorized operation.
    */
   private async lockClinic(id: string, transaction: Transaction) {
-    const [row] = await this.db.query<{ id: string }>("SELECT id FROM clinics WHERE id=:id FOR UPDATE", {
-      replacements: { id },
-      transaction,
-      type: QueryTypes.SELECT
-    });
-    if (!row) throw new NotFoundException("Clinic not found");
+    const [row] = await this.db.query<{ id: string; name: string }>(
+      "SELECT id,name FROM clinics WHERE id=:id FOR UPDATE",
+      {
+        replacements: { id },
+        transaction,
+        type: QueryTypes.SELECT
+      }
+    );
+    if (!row) throw new NotFoundException("No se encontró la clínica");
+    return row;
   }
 }

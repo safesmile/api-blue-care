@@ -1,5 +1,12 @@
+import { CrudEntityController } from "../../../shared/presentation/crud.controller";
+import { PermissionCode } from "../../../shared/domain/permission-code";
 import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Query, Req } from "@nestjs/common";
-import { MembershipsUseCase } from "../application/memberships.usecase";
+import { CrudMembershipsUseCase } from "../application/crudMemberships.usecase";
+import { CreateOwnMembershipUseCase } from "../application/createOwnMembership.usecase";
+import { CancelMembershipUseCase } from "../application/cancelMembership.usecase";
+import { SuspendMembershipUseCase } from "../application/suspendMembership.usecase";
+import { PeriodsMembershipUseCase } from "../application/periodsMembership.usecase";
+import { CheckoutMembershipUseCase } from "../application/checkoutMembership.usecase";
 import { OwnMembershipDto, CreateMembershipDto, MembershipQueryDto } from "./memberships.dto";
 import { PaginationDto } from "../../identity/presentation/user.dto";
 import { AuditReasonDto } from "../../../shared/presentation/audit-reason.dto";
@@ -7,20 +14,37 @@ import { Permissions } from "../../auth/presentation/auth.decorators";
 import type { AuthRequest } from "../../auth/presentation/auth.guard";
 /** Separates own patient contracts from clinic-scoped administrative operations. */
 @Controller("memberships")
-export class MembershipsController {
+export class MembershipsController extends CrudEntityController<CrudMembershipsUseCase> {
   /**
-   * Receives the persistence and policy boundaries.
-   * @param memberships Patient-global membership repository port.
+   * Recibe las dependencias de la operación.
+   * @param memberships Dependencia tipada de memberships.
+   * @param createOwnMembership Dependencia tipada de createOwnMembership.
+   * @param cancelMembership Dependencia tipada de cancelMembership.
+   * @param suspendMembership Dependencia tipada de suspendMembership.
+   * @param periodsMembership Dependencia tipada de periodsMembership.
+   * @param checkoutMembership Dependencia tipada de checkoutMembership.
    */
-  constructor(private readonly memberships: MembershipsUseCase) {}
+  constructor(
+    memberships: CrudMembershipsUseCase,
+    private readonly createOwnMembership: CreateOwnMembershipUseCase,
+    private readonly cancelMembership: CancelMembershipUseCase,
+    private readonly suspendMembership: SuspendMembershipUseCase,
+    private readonly periodsMembership: PeriodsMembershipUseCase,
+    private readonly checkoutMembership: CheckoutMembershipUseCase
+  ) {
+    super(memberships);
+  }
   /**
    * Creates a contract for the account-linked patient only.
    * @param input Validated operation fields.
    * @param request Request containing the authenticated identity or original webhook bytes.
    * @returns The persisted result or completion of the authorized operation.
    */
-  @Post("me") @Permissions("memberships:self") createOwn(@Body() input: OwnMembershipDto, @Req() request: AuthRequest) {
-    return this.memberships.createOwn(input, request.user);
+  @Post("me") @Permissions(PermissionCode.MembershipsSelf) createOwn(
+    @Body() input: OwnMembershipDto,
+    @Req() request: AuthRequest
+  ) {
+    return this.createOwnMembership.execute(input, request.user);
   }
   /**
    * Lists contracts of the account-linked patient.
@@ -28,8 +52,11 @@ export class MembershipsController {
    * @param request Request containing the authenticated identity or original webhook bytes.
    * @returns The persisted result or completion of the authorized operation.
    */
-  @Get("me") @Permissions("memberships:self") ownList(@Query() page: PaginationDto, @Req() request: AuthRequest) {
-    return this.memberships.list(page, request.user, true);
+  @Get("me") @Permissions(PermissionCode.MembershipsSelf) ownList(
+    @Query() page: PaginationDto,
+    @Req() request: AuthRequest
+  ) {
+    return this.crud("list", page, request.user, true);
   }
   /**
    * Reads only a contract of the account-linked patient.
@@ -37,11 +64,11 @@ export class MembershipsController {
    * @param request Request containing the authenticated identity or original webhook bytes.
    * @returns The persisted result or completion of the authorized operation.
    */
-  @Get("me/:id") @Permissions("memberships:self") ownRead(
+  @Get("me/:id") @Permissions(PermissionCode.MembershipsSelf) ownRead(
     @Param("id", ParseUUIDPipe) id: string,
     @Req() request: AuthRequest
   ) {
-    return this.memberships.read(id, request.user, true);
+    return this.crud("read", id, request.user, true);
   }
   /**
    * Lists paid periods of the account-linked contract.
@@ -50,12 +77,12 @@ export class MembershipsController {
    * @param request Request containing the authenticated identity or original webhook bytes.
    * @returns The persisted result or completion of the authorized operation.
    */
-  @Get("me/:id/periods") @Permissions("memberships:self") ownPeriods(
+  @Get("me/:id/periods") @Permissions(PermissionCode.MembershipsSelf) ownPeriods(
     @Param("id", ParseUUIDPipe) id: string,
     @Query() page: PaginationDto,
     @Req() request: AuthRequest
   ) {
-    return this.memberships.periods(id, page, request.user, true);
+    return this.periodsMembership.execute(id, page, request.user, true);
   }
   /**
    * Obtains one durable hosted quote without repeating ambiguous provider creation.
@@ -64,13 +91,13 @@ export class MembershipsController {
    * @param request Request containing the authenticated identity or original webhook bytes.
    * @returns The persisted result or completion of the authorized operation.
    */
-  @Post("me/:id/checkout") @Permissions("memberships:self") checkout(
+  @Post("me/:id/checkout") @Permissions(PermissionCode.MembershipsSelf) checkout(
     @Param("id", ParseUUIDPipe) id: string,
     @Body() input: AuditReasonDto,
     @Req() request: AuthRequest
   ) {
     void input;
-    return this.memberships.checkout(id, request.user);
+    return this.checkoutMembership.execute(id, request.user);
   }
   /**
    * Requests cancellation for the account-linked patient.
@@ -79,13 +106,13 @@ export class MembershipsController {
    * @param request Request containing the authenticated identity or original webhook bytes.
    * @returns The persisted result or completion of the authorized operation.
    */
-  @Post("me/:id/cancel") @Permissions("memberships:self") cancelOwn(
+  @Post("me/:id/cancel") @Permissions(PermissionCode.MembershipsSelf) cancelOwn(
     @Param("id", ParseUUIDPipe) id: string,
     @Body() input: AuditReasonDto,
     @Req() request: AuthRequest
   ) {
     void input;
-    return this.memberships.cancel(id, request.user, true);
+    return this.cancelMembership.execute(id, request.user, true);
   }
   /**
    * Creates an explicitly authorized pending record.
@@ -93,8 +120,11 @@ export class MembershipsController {
    * @param request Request containing the authenticated identity or original webhook bytes.
    * @returns The persisted result or completion of the authorized operation.
    */
-  @Post() @Permissions("memberships:create") create(@Body() input: CreateMembershipDto, @Req() request: AuthRequest) {
-    return this.memberships.create(input, request.user);
+  @Post() @Permissions(PermissionCode.MembershipsCreate) create(
+    @Body() input: CreateMembershipDto,
+    @Req() request: AuthRequest
+  ) {
+    return this.crud("create", input, request.user);
   }
   /**
    * Returns a bounded page within the caller scope.
@@ -102,8 +132,11 @@ export class MembershipsController {
    * @param request Request containing the authenticated identity or original webhook bytes.
    * @returns The persisted result or completion of the authorized operation.
    */
-  @Get() @Permissions("memberships:list") list(@Query() query: MembershipQueryDto, @Req() request: AuthRequest) {
-    return this.memberships.list(query, request.user);
+  @Get() @Permissions(PermissionCode.MembershipsList) list(
+    @Query() query: MembershipQueryDto,
+    @Req() request: AuthRequest
+  ) {
+    return this.crud("list", query, request.user);
   }
   /**
    * Reads one authorized resource without changing its state.
@@ -111,11 +144,11 @@ export class MembershipsController {
    * @param request Request containing the authenticated identity or original webhook bytes.
    * @returns The persisted result or completion of the authorized operation.
    */
-  @Get(":id") @Permissions("memberships:read") read(
+  @Get(":id") @Permissions(PermissionCode.MembershipsRead) read(
     @Param("id", ParseUUIDPipe) id: string,
     @Req() request: AuthRequest
   ) {
-    return this.memberships.read(id, request.user);
+    return this.crud("read", id, request.user);
   }
   /**
    * Lists immutable payments and their allocated periods.
@@ -124,12 +157,12 @@ export class MembershipsController {
    * @param request Request containing the authenticated identity or original webhook bytes.
    * @returns The persisted result or completion of the authorized operation.
    */
-  @Get(":id/periods") @Permissions("memberships:read") periods(
+  @Get(":id/periods") @Permissions(PermissionCode.MembershipsRead) periods(
     @Param("id", ParseUUIDPipe) id: string,
     @Query() page: PaginationDto,
     @Req() request: AuthRequest
   ) {
-    return this.memberships.periods(id, page, request.user);
+    return this.periodsMembership.execute(id, page, request.user);
   }
   /**
    * Stops future renewals while preserving confirmed paid coverage.
@@ -138,13 +171,13 @@ export class MembershipsController {
    * @param request Request containing the authenticated identity or original webhook bytes.
    * @returns The persisted result or completion of the authorized operation.
    */
-  @Post(":id/cancel") @Permissions("memberships:cancel") cancel(
+  @Post(":id/cancel") @Permissions(PermissionCode.MembershipsCancel) cancel(
     @Param("id", ParseUUIDPipe) id: string,
     @Body() input: AuditReasonDto,
     @Req() request: AuthRequest
   ) {
     void input;
-    return this.memberships.cancel(id, request.user);
+    return this.cancelMembership.execute(id, request.user);
   }
   /**
    * Suspends benefit eligibility immediately and queues billing pause.
@@ -153,12 +186,12 @@ export class MembershipsController {
    * @param request Request containing the authenticated identity or original webhook bytes.
    * @returns The persisted result or completion of the authorized operation.
    */
-  @Post(":id/suspend") @Permissions("memberships:suspend") suspend(
+  @Post(":id/suspend") @Permissions(PermissionCode.MembershipsSuspend) suspend(
     @Param("id", ParseUUIDPipe) id: string,
     @Body() input: AuditReasonDto,
     @Req() request: AuthRequest
   ) {
     void input;
-    return this.memberships.suspend(id, request.user);
+    return this.suspendMembership.execute(id, request.user);
   }
 }

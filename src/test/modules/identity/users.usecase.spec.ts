@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException, NotFoundException } from "@nestjs/common";
-import { UsersUseCase } from "../../../modules/identity/application/users.usecase";
+import { UsersUseCase } from "../../helpers/usecases/UsersUseCase";
 import { identityFixture, userFixture } from "../../helpers/identity.fixture";
 import type { RolesRepository } from "../../../modules/authorization/domain/roles.repository";
 import { REGISTERED_PERMISSIONS } from "../../../modules/authorization/infrastructure/permission-registry";
@@ -91,5 +91,17 @@ describe("UsersUseCase policies and canonical profiles", () => {
     await expect(useCase.delete("missing", actor)).rejects.toBeInstanceOf(NotFoundException);
     deps.users.list.mockRejectedValue(new Error("unavailable"));
     await expect(useCase.list({ limit: 25, offset: 0 }, actor)).rejects.toThrow("unavailable");
+  });
+  it("uses a scoped collaborator directory instead of global account listing", async () => {
+    deps.users.collaborators.mockResolvedValue({ items: [], total: 0 });
+    expect(() => useCase.collaborators({ limit: 25, offset: 0 }, { ...actor, permissions: [] })).toThrow(
+      ForbiddenException
+    );
+    await expect(useCase.collaborator("missing", { ...actor, permissions: [] })).rejects.toThrow(ForbiddenException);
+    expect(await useCase.collaborators({ limit: 25, offset: 0 }, actor)).toEqual({ items: [], total: 0 });
+    await expect(useCase.collaborator("missing", actor)).rejects.toThrow(NotFoundException);
+    const record = { ...userFixture().toView(), clinics: [] };
+    deps.users.collaborators.mockResolvedValue({ items: [record], total: 1 });
+    expect(await useCase.collaborator(record.id, actor)).toEqual(record);
   });
 });

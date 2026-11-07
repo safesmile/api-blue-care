@@ -1,3 +1,4 @@
+import { PermissionCode } from "../../../shared/domain/permission-code";
 import { randomUUID } from "node:crypto";
 import { QueryTypes, type Sequelize, type Transaction } from "sequelize";
 import { REGISTERED_PERMISSIONS } from "./permission-registry";
@@ -14,13 +15,19 @@ export async function preserveLegacyGrants(db: Sequelize, transaction: Transacti
    * @returns Current permission codes without automatic superadmin promotion.
    */
   function expand(values: string[]) {
-    const codes = new Set(["auth:me"]);
+    const codes = new Set<string>([PermissionCode.AuthMe]);
     for (const value of values) {
       if (value === "users:write")
-        for (const code of ["users:create", "users:update", "users:delete", "roles:assign"]) codes.add(code);
-      else if (value === "users:read") {
+        for (const code of [
+          PermissionCode.UsersCreate,
+          PermissionCode.UsersUpdate,
+          PermissionCode.UsersDelete,
+          PermissionCode.RolesAssign
+        ])
+          codes.add(code);
+      else if (value === PermissionCode.UsersRead) {
         codes.add(value);
-        codes.add("users:list");
+        codes.add(PermissionCode.UsersList);
       } else if (catalog.has(value)) codes.add(value);
     }
     return [...codes];

@@ -1,14 +1,14 @@
 import { Test } from "@nestjs/testing";
 import request from "supertest";
 import { RecurrenteWebhookController } from "../../../modules/memberships/presentation/recurrente-webhook.controller";
-import { MembershipsUseCase } from "../../../modules/memberships/application/memberships.usecase";
+import { MembershipsUseCase } from "../../helpers/usecases/MembershipsUseCase";
 describe("RecurrenteWebhookController", () => {
   let app;
   const service = { receive: jest.fn().mockResolvedValue(undefined) };
   beforeAll(async () => {
     const module = await Test.createTestingModule({
       controllers: [RecurrenteWebhookController],
-      providers: [{ provide: MembershipsUseCase, useValue: service }]
+      providers: [...MembershipsUseCase.providers(service)]
     }).compile();
     app = module.createNestApplication({ rawBody: true });
     await app.init();

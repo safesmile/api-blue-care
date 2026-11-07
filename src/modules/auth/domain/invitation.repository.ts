@@ -1,5 +1,5 @@
 import type { AccessActor } from "../../authorization/domain/access-policy";
-import type { Invitation } from "./invitation.entity";
+import type { Invitation, InvitationKind } from "./invitation.entity";
 import type { Page, Pagination } from "../../../shared/domain/crud.repository";
 /**
  * Defines atomic invitation persistence transitions.
@@ -24,7 +24,7 @@ export abstract class InvitationRepository {
    * Returns a bounded page of resources and its total count.
    * @param page Bounded pagination values.
    */
-  abstract list(page: Pagination): Promise<Page<Invitation>>;
+  abstract list(page: Pagination & { kind?: InvitationKind }, actor?: AccessActor): Promise<Page<Invitation>>;
   /**
    * Consumes the current session and persists its successor atomically.
    * @param id Resource identifier.

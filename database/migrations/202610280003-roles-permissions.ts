@@ -39,12 +39,18 @@ export = {
       await q.createTable(
         "user_roles",
         {
-          userId: { type: S.UUID, primaryKey: true, references: { model: "users", key: "id" }, onDelete: "CASCADE" },
-          roleId: { type: S.UUID, primaryKey: true, references: { model: "roles", key: "id" }, onDelete: "CASCADE" }
+          id: { type: S.UUID, primaryKey: true, defaultValue: S.literal("gen_random_uuid()") },
+          userId: { type: S.UUID, allowNull: false, references: { model: "users", key: "id" }, onDelete: "CASCADE" },
+          roleId: { type: S.UUID, allowNull: false, references: { model: "roles", key: "id" }, onDelete: "CASCADE" },
+          clinicId: { type: S.UUID, allowNull: true }
         },
         { transaction }
       );
       await q.addIndex("user_roles", ["roleId"], { transaction });
+      await q.sequelize.query(
+        'CREATE UNIQUE INDEX user_roles_scope ON user_roles ("userId","roleId","clinicId") NULLS NOT DISTINCT',
+        { transaction }
+      );
     });
   },
   async down(q: QueryInterface) {

@@ -1,6 +1,6 @@
 import request from "supertest";
 import { BenefitAccountsController } from "../../../modules/benefits/presentation/benefit-accounts.controller";
-import { BenefitOperationsUseCase } from "../../../modules/benefits/application/benefit-operations.usecase";
+import { BenefitOperationsUseCase } from "../../helpers/usecases/BenefitOperationsUseCase";
 import { controllerApp } from "../../helpers/controller-app";
 import { userFixture } from "../../helpers/identity.fixture";
 describe("BenefitAccountsController", () => {
@@ -18,11 +18,7 @@ describe("BenefitAccountsController", () => {
   const input = { firstName: "Relative", lastName: "Example" };
   let app;
   beforeAll(async () => {
-    app = await controllerApp(
-      BenefitAccountsController,
-      [{ provide: BenefitOperationsUseCase, useValue: service }],
-      actor
-    );
+    app = await controllerApp(BenefitAccountsController, [...BenefitOperationsUseCase.providers(service)], actor);
   });
   afterAll(async () => {
     await app.close();

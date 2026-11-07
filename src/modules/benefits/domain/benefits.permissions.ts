@@ -1,72 +1,73 @@
+import { PermissionCode } from "../../../shared/domain/permission-code";
 export const BENEFITS_PERMISSION_DEFINITIONS = [
   {
-    shortcode: "benefits:create",
+    shortcode: PermissionCode.BenefitsCreate,
     scope: "benefits.create",
     group: "Benefits",
     description: "create benefits within the explicit operation scope"
   },
   {
-    shortcode: "benefits:read",
+    shortcode: PermissionCode.BenefitsRead,
     scope: "benefits.read",
     group: "Benefits",
     description: "read benefits within the explicit operation scope"
   },
   {
-    shortcode: "benefits:list",
+    shortcode: PermissionCode.BenefitsList,
     scope: "benefits.list",
     group: "Benefits",
     description: "list benefits within the explicit operation scope"
   },
   {
-    shortcode: "benefits:version",
+    shortcode: PermissionCode.BenefitsVersion,
     scope: "benefits.version",
     group: "Benefits",
     description: "version benefits within the explicit operation scope"
   },
   {
-    shortcode: "benefits:publish",
+    shortcode: PermissionCode.BenefitsPublish,
     scope: "benefits.publish",
     group: "Benefits",
     description: "publish benefits within the explicit operation scope"
   },
   {
-    shortcode: "benefits:family-settings",
+    shortcode: PermissionCode.BenefitsFamilySettings,
     scope: "benefits.family-settings",
     group: "Benefits",
     description: "family-settings benefits within the explicit operation scope"
   },
   {
-    shortcode: "benefits:balances",
+    shortcode: PermissionCode.BenefitsBalances,
     scope: "benefits.balances",
     group: "Benefits",
     description: "balances benefits within the explicit operation scope"
   },
   {
-    shortcode: "benefits:consume",
+    shortcode: PermissionCode.BenefitsConsume,
     scope: "benefits.consume",
     group: "Benefits",
     description: "consume benefits within the explicit operation scope"
   },
   {
-    shortcode: "benefits:reverse",
+    shortcode: PermissionCode.BenefitsReverse,
     scope: "benefits.reverse",
     group: "Benefits",
     description: "reverse benefits within the explicit operation scope"
   },
   {
-    shortcode: "benefits:history",
+    shortcode: PermissionCode.BenefitsHistory,
     scope: "benefits.history",
     group: "Benefits",
     description: "history benefits within the explicit operation scope"
   },
   {
-    shortcode: "benefits:family-manage",
+    shortcode: PermissionCode.BenefitsFamilyManage,
     scope: "benefits.family-manage",
     group: "Benefits",
     description: "family-manage benefits within the explicit operation scope"
   },
   {
-    shortcode: "benefits:self",
+    shortcode: PermissionCode.BenefitsSelf,
     scope: "benefits.self",
     group: "Benefits",
     description: "Read own benefits and manage own family and presentation tickets"

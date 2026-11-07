@@ -1,3 +1,4 @@
+import { clinicScopeParams } from "../../clinics/infrastructure/clinic-scope";
 import { ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import { Sequelize } from "sequelize-typescript";
 import { QueryTypes, type Transaction } from "sequelize";
@@ -25,8 +26,8 @@ const MEMBERSHIP = `SELECT m.*,v."planId",p."userId",p.enabled AS "patientEnable
 @Injectable()
 export class BenefitContext {
   /**
-   * Initializes the benefit service dependencies.
-   * @param db PostgreSQL connection.
+   * Recibe las dependencias de la operación.
+   * @param db Dependencia tipada de db.
    */
   constructor(private readonly db: Sequelize) {}
   /**
@@ -53,24 +54,24 @@ export class BenefitContext {
         transaction,
         type: QueryTypes.SELECT
       });
-      if (!hint) throw new NotFoundException("Membership not found");
+      if (!hint) throw new NotFoundException("No se encontró la membresía");
       const [patient] = await this.db.query<{ userId: string | null }>(
         'SELECT "userId" FROM patients WHERE id=:patientId FOR UPDATE',
         { replacements: { patientId: hint.patientId }, transaction, type: QueryTypes.SELECT }
       );
-      if (own && patient.userId !== actor.id) throw new NotFoundException("Membership not found");
+      if (own && patient.userId !== actor.id) throw new NotFoundException("No se encontró la membresía");
       if (!own && !presented) await requirePatientScope(this.db, transaction, hint.patientId, actor);
     }
     const access = write ? "" : ' AND ((:own AND p."userId"=:actorId) OR (NOT :own AND ' + PATIENT_SCOPE_SQL + "))";
     const [row] = await this.db.query<BenefitMembership>(
       MEMBERSHIP + " WHERE m.id=:id" + access + (write ? " FOR UPDATE OF m" : ""),
       {
-        replacements: { id, own, actorId: actor.id, all: actor.permissions.includes("clinics:all") },
+        replacements: { id, own, ...clinicScopeParams(actor) },
         transaction,
         type: QueryTypes.SELECT
       }
     );
-    if (!row) throw new NotFoundException("Membership not found");
+    if (!row) throw new NotFoundException("No se encontró la membresía");
     return row;
   }
   /**
@@ -94,8 +95,8 @@ export class BenefitContext {
       'SELECT b.*,TO_JSONB(v) AS "currentVersion" FROM benefit_definitions b LEFT JOIN benefit_versions v ON v.id=b."currentVersionId" WHERE b.id=:id AND b."planId"=:planId',
       { replacements: { id, planId: membership.planId }, transaction, type: QueryTypes.SELECT }
     );
-    if (!row) throw new NotFoundException("Benefit does not belong to this membership plan");
-    if (!row.currentVersion) throw new ConflictException("Benefit has no published rules");
+    if (!row) throw new NotFoundException("El beneficio no pertenece al plan de esta membresía");
+    if (!row.currentVersion) throw new ConflictException("El beneficio no tiene reglas publicadas");
     return row;
   }
   /**
@@ -116,7 +117,7 @@ export class BenefitContext {
        WHERE b.id=:beneficiaryId AND s."patientId"=:patientId`,
       { replacements: { beneficiaryId, patientId: membership.patientId }, transaction, type: QueryTypes.SELECT }
     );
-    if (!row) throw new NotFoundException("Beneficiary does not belong to this patient");
+    if (!row) throw new NotFoundException("El beneficiario no pertenece a este paciente");
     return { key: row.id, active: row.active, name: row.firstName + " " + row.lastName };
   }
   /**
@@ -142,7 +143,7 @@ export class BenefitContext {
       "SELECT name FROM users WHERE id=:id AND enabled AND verified FOR SHARE",
       { replacements: { id: actor.id }, transaction, type: QueryTypes.SELECT }
     );
-    if (!row) throw new ForbiddenException("Actor is no longer active and verified");
+    if (!row) throw new ForbiddenException("La cuenta que realiza la operación ya no está activa y verificada");
     return row.name;
   }
   /**
@@ -203,6 +204,6 @@ export class BenefitContext {
    */
   requireActive(membership: BenefitMembership, now: Date) {
     if (!membership.patientEnabled || !membershipStatus(membership, now).eligible)
-      throw new ConflictException("Membership has no active paid benefit eligibility");
+      throw new ConflictException("La membresía no tiene cobertura pagada vigente para utilizar beneficios");
   }
 }

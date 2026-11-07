@@ -1,14 +1,14 @@
 import request from "supertest";
 import { Test } from "@nestjs/testing";
 import { PreventionJobsController } from "../../../modules/prevention/presentation/prevention-jobs.controller";
-import { PreventionUseCase } from "../../../modules/prevention/application/prevention.usecase";
+import { PreventionUseCase } from "../../helpers/usecases/PreventionUseCase";
 import { GoogleJobGuard } from "../../../infrastructure/jobs/google-job.guard";
 describe("PreventionJobsController", () => {
   it("runs only a bounded durable sweep after the internal guard", async () => {
     const service = { drain: jest.fn().mockResolvedValue({ generated: 1 }) };
     const module = await Test.createTestingModule({
       controllers: [PreventionJobsController],
-      providers: [{ provide: PreventionUseCase, useValue: service }]
+      providers: [...PreventionUseCase.providers(service)]
     })
       .overrideGuard(GoogleJobGuard)
       .useValue({ canActivate: () => true })

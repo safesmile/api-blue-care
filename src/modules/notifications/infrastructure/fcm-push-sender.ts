@@ -7,8 +7,8 @@ import { PushSender, type PushDelivery } from "../domain/push.repository";
 export class FcmPushSender extends PushSender {
   private readonly auth = new GoogleAuth({ scopes: ["https://www.googleapis.com/auth/firebase.messaging"] });
   /**
-   * Receives the explicit persistence and transport dependencies.
-   * @param config Validated environment settings.
+   * Recibe las dependencias de la operación.
+   * @param config Dependencia tipada de config.
    */
   constructor(private readonly config: ConfigService) {
     super();

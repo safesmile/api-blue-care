@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException, NotFoundException } from "@nestjs/common";
-import { AuditUseCase } from "../../../modules/audit/application/audit.usecase";
+import { AuditUseCase } from "../../helpers/usecases/AuditUseCase";
 import { userFixture } from "../../helpers/identity.fixture";
 describe("AuditUseCase", () => {
   const repository = { list: jest.fn(), read: jest.fn() },

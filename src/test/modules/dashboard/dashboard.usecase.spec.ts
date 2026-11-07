@@ -1,5 +1,5 @@
 import { ForbiddenException } from "@nestjs/common";
-import { DashboardUseCase } from "../../../modules/dashboard/application/dashboard.usecase";
+import { DashboardUseCase } from "../../helpers/usecases/DashboardUseCase";
 import { userFixture } from "../../helpers/identity.fixture";
 describe("DashboardUseCase", () => {
   it("requires an explicit dashboard permission independent of other profile grants", async () => {

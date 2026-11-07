@@ -107,7 +107,12 @@
     "collectCoverageFrom": [
       "modules/**/application/**/*.ts",
       "modules/**/presentation/*controller.ts",
-      "app.controller.ts"
+      "app.controller.ts",
+      "shared/application/entity.usecase.ts",
+      "shared/presentation/crud.controller.ts",
+      "shared/presentation/api-exception.filter.ts",
+      "shared/presentation/api-validation.pipe.ts",
+      "modules/authorization/domain/access-policy.ts"
     ],
     "coverageDirectory": "../coverage",
     "testEnvironment": "node",

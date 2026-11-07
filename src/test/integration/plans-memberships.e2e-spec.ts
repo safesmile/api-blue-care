@@ -1,5 +1,6 @@
+import { ApiValidationPipe } from "../../shared/presentation/api-validation.pipe";
+import { assignClinicOperator } from "../helpers/clinic-operator.fixture";
 import { Test } from "@nestjs/testing";
-import { ValidationPipe } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { Sequelize } from "sequelize-typescript";
 import { QueryTypes } from "sequelize";
@@ -7,18 +8,18 @@ import { createHmac, randomUUID } from "node:crypto";
 import request from "supertest";
 import { AppModule } from "../../app.module";
 import { createSuperUser } from "../../../scripts/lib/super-user";
-import { AuthUseCase } from "../../modules/auth/application/auth.usecase";
-import { AccountActionsUseCase } from "../../modules/auth/application/account-actions.usecase";
+import { AuthUseCase } from "../helpers/usecases/AuthUseCase";
+import { AccountActionsUseCase } from "../helpers/usecases/AccountActionsUseCase";
 import { AccountMailer } from "../../modules/auth/domain/account-actions.repository";
 import { EmailSender } from "../../shared/domain/email-sender";
 import { MembershipGateway, type VerifiedPayment } from "../../modules/memberships/domain/membership-billing";
 import { RecurrenteGateway } from "../../modules/memberships/infrastructure/recurrente-gateway";
-import { MembershipsUseCase } from "../../modules/memberships/application/memberships.usecase";
+import { MembershipsUseCase } from "../helpers/usecases/MembershipsUseCase";
 
 describe("Versioned plans, memberships and durable provider boundaries (disposable PostgreSQL)", () => {
   let app,
     db: Sequelize,
-    service: MembershipsUseCase,
+    service: ReturnType<typeof MembershipsUseCase.resolve>,
     rootToken: string,
     tokenA: string,
     tokenB: string,
@@ -67,10 +68,10 @@ describe("Versioned plans, memberships and durable provider boundaries (disposab
     const user = (
       await api().post("/users").send({ firstName: "Member", lastName: "Example", email, password, roles }).expect(201)
     ).body;
-    await app.get(AccountActionsUseCase).requestActivation(email);
+    await AccountActionsUseCase.resolve(app).requestActivation(email);
     const token = mail.findLast(item => item.email === email && item.kind === "activate")!.token;
-    await app.get(AccountActionsUseCase).redeem("activate", token, password);
-    const login = await app.get(AuthUseCase).login(email, password);
+    await AccountActionsUseCase.resolve(app).redeem("activate", token, password);
+    const login = await AuthUseCase.resolve(app).login(email, password);
     return { user, token: login.token };
   };
   const versionInput = {
@@ -112,10 +113,10 @@ describe("Versioned plans, memberships and durable provider boundaries (disposab
       .useValue(gateway)
       .compile();
     app = module.createNestApplication({ rawBody: true });
-    app.useGlobalPipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }));
+    app.useGlobalPipes(new ApiValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }));
     await app.init();
     db = app.get(Sequelize);
-    service = app.get(MembershipsUseCase);
+    service = MembershipsUseCase.resolve(app);
     await createSuperUser(db, {
       firstName: "Billing",
       lastName: "Operator",
@@ -130,8 +131,10 @@ describe("Versioned plans, memberships and durable provider boundaries (disposab
     ).body.token;
     clinicA = (await api().post("/clinics").send({ code: "membership-north", name: "Membership north" }).expect(201))
       .body;
+    await assignClinicOperator(app, rootToken, clinicA.id);
     clinicB = (await api().post("/clinics").send({ code: "membership-south", name: "Membership south" }).expect(201))
       .body;
+    await assignClinicOperator(app, rootToken, clinicB.id);
     ({ user: memberA, token: tokenA } = await account("membership-a@blue.test", ["customer"]));
     ({ user: memberB, token: tokenB } = await account("membership-b@blue.test", ["customer"]));
     patientA = (
@@ -440,6 +443,7 @@ describe("Versioned plans, memberships and durable provider boundaries (disposab
     staffToken = staff.token;
     await api()
       .put("/clinics/" + clinicA.id + "/staff/" + staff.user.id)
+      .send({ roles: ["customer"] })
       .expect(204);
     await api(staffToken)
       .get("/memberships/" + contractA.id)

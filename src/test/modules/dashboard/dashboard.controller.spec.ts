@@ -1,13 +1,13 @@
 import request from "supertest";
 import { DashboardController } from "../../../modules/dashboard/presentation/dashboard.controller";
-import { DashboardUseCase } from "../../../modules/dashboard/application/dashboard.usecase";
+import { DashboardUseCase } from "../../helpers/usecases/DashboardUseCase";
 import { controllerApp } from "../../helpers/controller-app";
 import { userFixture } from "../../helpers/identity.fixture";
 describe("DashboardController", () => {
   it("validates horizons and explicit clinic filters for both read models", async () => {
     const service = { metrics: jest.fn(), expiring: jest.fn(), upcoming: jest.fn() },
       actor = userFixture().toView(),
-      app = await controllerApp(DashboardController, [{ provide: DashboardUseCase, useValue: service }], actor);
+      app = await controllerApp(DashboardController, [...DashboardUseCase.providers(service)], actor);
     try {
       await request(app.getHttpServer()).get("/dashboard").expect(200);
       await request(app.getHttpServer()).get("/dashboard/prevention/upcoming").expect(200);

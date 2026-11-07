@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException, NotFoundException } from "@nestjs/common";
-import { PreventionUseCase } from "../../../modules/prevention/application/prevention.usecase";
+import { PreventionUseCase } from "../../helpers/usecases/PreventionUseCase";
 import { REGISTERED_PERMISSIONS } from "../../../modules/authorization/infrastructure/permission-registry";
 import { userFixture } from "../../helpers/identity.fixture";
 describe("PreventionUseCase", () => {

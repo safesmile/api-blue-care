@@ -1,3 +1,4 @@
+import { clinicContextFixture } from "../../helpers/clinic-context.fixture";
 import { ForbiddenException, UnauthorizedException, type ExecutionContext } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
 import { JwtService } from "@nestjs/jwt";
@@ -13,7 +14,7 @@ describe("AuthGuard role authorization", () => {
   beforeEach(() => {
     dependencies = identityFixture();
     sessions = { create: jest.fn(), rotate: jest.fn(), revoke: jest.fn(), isActive: jest.fn().mockResolvedValue(true) };
-    guard = new AuthGuard(new Reflector(), jwt, dependencies.users, sessions);
+    guard = new AuthGuard(new Reflector(), jwt, dependencies.users, sessions, clinicContextFixture());
   });
   /**
    * Builds a request context with real permission metadata.
@@ -30,7 +31,10 @@ describe("AuthGuard role authorization", () => {
       headers: {
         authorization:
           "Bearer " +
-          jwt.sign({ sub: userFixture().id, sid: "session" }, { issuer: "blue-dent", audience: "blue-dent-api" })
+          jwt.sign(
+            { sub: userFixture().id, sid: "session", mode: "staff", clinicId: null },
+            { issuer: "blue-dent", audience: "blue-dent-api" }
+          )
       },
       body,
       params: { id: "target" },
@@ -85,5 +89,17 @@ describe("AuthGuard role authorization", () => {
     actor.props.verified = false;
     dependencies.users.read.mockResolvedValue(actor);
     await expect(guard.canActivate(context().value)).rejects.toBeInstanceOf(UnauthorizedException);
+  });
+  it("puts the validated clinic selection and operation into the actor and binds the claim to the session", async () => {
+    const actor = userFixture();
+    actor.props.permissions.push("patients:read");
+    dependencies.users.read.mockResolvedValue(actor);
+    const ctx = context("patients:read");
+    await guard.canActivate(ctx.value);
+    expect(ctx.request.user).toEqual(expect.objectContaining({ clinicId: null, clinicPermission: "patients:read" }));
+    expect(sessions.isActive).toHaveBeenCalledWith("session", actor.id, null, "staff");
+    ctx.request.headers.authorization =
+      "Bearer " + jwt.sign({ sub: actor.id, sid: "session" }, { issuer: "blue-dent", audience: "blue-dent-api" });
+    await expect(guard.canActivate(ctx.value)).rejects.toThrow(UnauthorizedException);
   });
 });

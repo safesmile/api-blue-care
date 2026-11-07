@@ -16,7 +16,7 @@ Actualizar el perfil no sobrescribe email, passwordHash, verified ni asignacione
 
 `AuthGuard` verifica el JWT, la sesión revocable, el estado habilitado/verificado y los permisos declarados por la ruta. Una ruta privada sin política continúa denegada. No interpreta el cuerpo HTTP ni reconoce nombres de recursos para decidir propiedad o asignación de roles.
 
-Los casos de uso de usuarios exigen un actor explícito con el permiso de la operación. `AccessPolicy` decide propiedad, delegación y protección de superadmin. La persistencia vuelve a comprobar las restricciones críticas al escribir usando transacciones y bloqueos. Las llamadas internas a `UsersUseCase` sin actor también se deniegan; la provisión operativa sigue usando el script específico.
+Los casos de uso de usuarios exigen un actor explícito con el permiso de la operación. `AccessPolicy` decide propiedad, delegación y protección de superadmin. La persistencia vuelve a comprobar las restricciones críticas al escribir usando transacciones y bloqueos. Las llamadas internas a `CrudUsersUseCase` sin actor también se deniegan; la provisión operativa sigue usando el script específico.
 
 - `users:read`, `users:update` y `users:delete` permiten actuar sobre la identidad propia, según la operación concedida.
 - Para otras identidades se necesita además `users:manage`. Listar o crear usuarios también exige `users:manage` y el permiso específico.
@@ -72,3 +72,12 @@ Una identidad no verificada con un rol personalizado puede solicitar y confirmar
 No están implementados por estos cambios: matriz de personal por clínica, módulos de pacientes/membresías, pantallas del frontend. El documento de negocio conserva las decisiones y preguntas correspondientes. La protección y delegación de permisos aquí descritas constituyen controles de seguridad generales, no una matriz clínica inventada.
 
 Los cambios de usuarios y roles ya generan auditoría y notificaciones transaccionales según [audit-events.md](audit-events.md). El motivo administrativo opcional se recibe como reason; no selecciona al actor. El historial global requiere audit:list/audit:read y no se concede automáticamente a admin/customer.
+
+## Actualización DN-17: roles por clínica
+
+El estado vigente es clinic-context.md. user_roles incluye clinicId nullable e ID, con unicidad por usuario/rol/ámbito. Editar roles de la identidad modifica solo los globales y conserva los de sus clínicas. Los roles locales se sustituyen mediante PUT de staff de esa sede; DELETE retira acceso y roles únicamente allí. El contexto efectivo y las clínicas disponibles se devuelven desde auth, no se persisten como grants del usuario ni se infieren de nombres. admin global dispone de gestión de asignaciones/invitaciones dentro de sus permisos; un rol local no hereda gestión global por llamarse admin.
+
+Actualización DN-20 (06/11/2026): la interfaz gestiona colaboradores y pacientes por separado con formularios de página. Los endpoints específicos fijan la identidad básica staff/customer y no aceptan roles globales del cliente. Paciente usa la clínica actual para su ficha, sin asignación de personal; Todas exige seleccionar una sede. Ver people-management.md para rutas, permisos, historial por kind y creación/aceptación atómicas. La explicación histórica del flujo genérico permanece solo como compatibilidad.
+
+
+Organización de aplicación actualizada: ver [casos de uso y CRUD](application-architecture.md). Las políticas generales se ejecutan en las bases abstractas; las reglas de propiedad/delegación y la revalidación transaccional permanecen vigentes.

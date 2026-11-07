@@ -94,6 +94,7 @@ export default tseslint.config(
             "consumptions",
             "shortcode",
             "varchar",
+            "jsonb",
             "dict",
             "fff",
             "signout",

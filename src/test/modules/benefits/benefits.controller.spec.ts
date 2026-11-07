@@ -1,6 +1,6 @@
 import request from "supertest";
 import { BenefitsController } from "../../../modules/benefits/presentation/benefits.controller";
-import { BenefitsUseCase } from "../../../modules/benefits/application/benefits.usecase";
+import { BenefitsUseCase } from "../../helpers/usecases/BenefitsUseCase";
 import { controllerApp } from "../../helpers/controller-app";
 import { userFixture } from "../../helpers/identity.fixture";
 describe("BenefitsController", () => {
@@ -20,7 +20,7 @@ describe("BenefitsController", () => {
     version = { name: "Benefit", description: "Description", limitUnits: 1, discountBasisPoints: 1500, enabled: true };
   let app;
   beforeAll(async () => {
-    app = await controllerApp(BenefitsController, [{ provide: BenefitsUseCase, useValue: service }], actor);
+    app = await controllerApp(BenefitsController, [...BenefitsUseCase.providers(service)], actor);
   });
   afterAll(async () => {
     await app.close();

@@ -1,5 +1,5 @@
 import { ForbiddenException, NotFoundException } from "@nestjs/common";
-import { RolesUseCase } from "../../../modules/authorization/application/roles.usecase";
+import { RolesUseCase } from "../../helpers/usecases/RolesUseCase";
 import { REGISTERED_PERMISSIONS } from "../../../modules/authorization/infrastructure/permission-registry";
 import { userFixture } from "../../helpers/identity.fixture";
 describe("RolesUseCase", () => {
@@ -10,6 +10,7 @@ describe("RolesUseCase", () => {
     update: jest.fn(),
     delete: jest.fn(),
     catalog: jest.fn(),
+    clinicAssignable: jest.fn(),
     authorizeAssignment: jest.fn()
   };
   const useCase = new RolesUseCase(repository);

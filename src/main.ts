@@ -1,5 +1,5 @@
+import { ApiValidationPipe } from "./shared/presentation/api-validation.pipe";
 import { NestFactory } from "@nestjs/core";
-import { ValidationPipe } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { loadSecrets } from "./infrastructure/config/load-secrets";
 /**
@@ -18,7 +18,7 @@ async function bootstrap() {
       .map(value => value.trim())
   });
   app.useGlobalPipes(
-    new ValidationPipe({
+    new ApiValidationPipe({
       whitelist: true,
       forbidNonWhitelisted: true,
       transform: true

@@ -19,10 +19,9 @@ import type { Pagination } from "../../../shared/domain/crud.repository";
 @Injectable()
 export class SqlRolesRepository extends RolesRepository {
   /**
-   *
-   * @param db PostgreSQL connection.
-   * @param authorization Transactional role resolver.
-   * @returns Result of the completed operation.
+   * Recibe las dependencias de la operación.
+   * @param db Dependencia tipada de db.
+   * @param authorization Dependencia tipada de authorization.
    */
   constructor(
     private readonly db: Sequelize,
@@ -68,6 +67,32 @@ export class SqlRolesRepository extends RolesRepository {
     return [...REGISTERED_PERMISSIONS];
   }
   /**
+   * Filters clinic role options using the same transactional delegation checks as assignment.
+   * @param clinicId Target clinic.
+   * @param actor Current inviter.
+   * @returns Roles that can be assigned in that clinic.
+   */
+  async clinicAssignable(clinicId: string, actor: AccessActor) {
+    return this.db.transaction(async transaction => {
+      const rows = await this.db.query<{ id: string; name: string }>(
+        "SELECT id,name FROM roles WHERE name NOT IN ('customer','staff','superadmin') AND name NOT LIKE 'legacy-%' ORDER BY name",
+        { type: QueryTypes.SELECT, transaction }
+      );
+      const allowed: RoleView[] = [];
+      for (const row of rows) {
+        try {
+          await this.authorization.assertClinicAssignable([{ clinicId, roles: [row.name] }], actor, transaction);
+        } catch (error) {
+          if (error instanceof ForbiddenException) continue;
+          throw error;
+        }
+        const role = await this.read(row.id);
+        if (role) allowed.push(role);
+      }
+      return allowed;
+    });
+  }
+  /**
    *
    * @param names Requested role names.
    * @param actor Authenticated caller and current effective grants.
@@ -84,20 +109,20 @@ export class SqlRolesRepository extends RolesRepository {
     if (
       !/^[a-z][a-z0-9-]{1,59}$/.test(input.name) ||
       input.name.startsWith("legacy-") ||
-      ["superadmin", "admin", "customer"].includes(input.name)
+      ["superadmin", "admin", "customer", "staff"].includes(input.name)
     )
-      throw new BadRequestException("Reserved or invalid role name");
+      throw new BadRequestException("El nombre del rol está reservado o no es válido");
     if (
       !input.description.trim() ||
       input.description.length > 255 ||
       input.permissions.length > 200 ||
       new Set(input.permissions).size !== input.permissions.length
     )
-      throw new BadRequestException("Invalid role definition");
+      throw new BadRequestException("La definición del rol no es válida");
     const catalog = new Set<string>(REGISTERED_PERMISSIONS.map(p => p.shortcode));
-    if (input.permissions.some(code => !catalog.has(code))) throw new BadRequestException("Unknown permission");
+    if (input.permissions.some(code => !catalog.has(code))) throw new BadRequestException("El permiso no existe");
     if (!AccessPolicy.delegates(actor, input.permissions))
-      throw new ForbiddenException("Cannot delegate permissions you do not hold");
+      throw new ForbiddenException("No puede delegar permisos que usted no posee");
   }
   /**
    *
@@ -143,7 +168,7 @@ export class SqlRolesRepository extends RolesRepository {
         );
       });
     } catch (error) {
-      if (error instanceof UniqueConstraintError) throw new ConflictException("Role already exists");
+      if (error instanceof UniqueConstraintError) throw new ConflictException("El rol ya existe");
       throw error;
     }
     return (await this.read(id))!;
@@ -160,10 +185,10 @@ export class SqlRolesRepository extends RolesRepository {
       'SELECT id,name,description,"isProtected" FROM roles WHERE id = :id FOR UPDATE',
       { replacements: { id }, transaction, type: QueryTypes.SELECT }
     );
-    if (!row) throw new NotFoundException("Role not found");
-    if (row.isProtected) throw new ForbiddenException("System roles are managed by configuration");
+    if (!row) throw new NotFoundException("No se encontró el rol");
+    if (row.isProtected) throw new ForbiddenException("Los roles del sistema se administran mediante la configuración");
     if (!AccessPolicy.delegates(actor, await this.authorization.permissionsFor([row.name], transaction)))
-      throw new ForbiddenException("Role exceeds your grants");
+      throw new ForbiddenException("El rol contiene permisos que usted no posee");
     return row;
   }
   /**
@@ -179,7 +204,9 @@ export class SqlRolesRepository extends RolesRepository {
       this.validate(input, actor);
       const before = { ...role, permissions: await this.authorization.permissionsFor([role.name], transaction) };
       if (input.name !== role.name)
-        throw new BadRequestException("Role name is immutable; update its description or permissions");
+        throw new BadRequestException(
+          "El nombre del rol no se puede cambiar; puede actualizar su descripción o sus permisos"
+        );
       await this.db.query("UPDATE roles SET description = :description WHERE id = :id", {
         replacements: { id, description: input.description.trim() },
         transaction
@@ -214,11 +241,21 @@ export class SqlRolesRepository extends RolesRepository {
     await this.db.transaction(async transaction => {
       const role = await this.editable(id, actor, transaction);
       const [usage] = await this.db.query<{ used: boolean }>(
-        `SELECT EXISTS(SELECT 1 FROM user_roles WHERE "roleId" = :id)
-        OR EXISTS(SELECT 1 FROM invitations WHERE status = 'pending' AND "expiresAt" > NOW() AND :name = ANY(roles)) AS used`,
+        `SELECT EXISTS(SELECT 1
+ FROM user_roles
+ WHERE "roleId" = :id)
+
+ OR EXISTS(SELECT 1
+ FROM invitations
+ WHERE status = 'pending'
+ AND "expiresAt" > NOW()
+ AND (:name = ANY(roles)
+ OR EXISTS(SELECT 1
+ FROM jsonb_array_elements("clinicAssignments") a
+ WHERE (a->'roles') @> jsonb_build_array(CAST(:name AS TEXT)))) ) AS used`,
         { replacements: { id, name: role.name }, transaction, type: QueryTypes.SELECT }
       );
-      if (usage.used) throw new ConflictException("Role is assigned or reserved by an active invitation");
+      if (usage.used) throw new ConflictException("El rol está asignado o reservado por una invitación vigente");
       await recordChange(
         this.db,
         transaction,

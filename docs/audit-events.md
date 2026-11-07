@@ -99,3 +99,7 @@ Configuración/publicación, familia, consumo, presentación y anulación regist
 ## Prevención y dispositivos push
 
 Tipos, altas/reprogramaciones, realizaciones/cancelaciones y generación de recordatorios se auditan en la transacción de recurso, con snapshots permitidos. Dispositivos registran identificador/plataforma/estado, nunca token ni hash. Una falla de auditoría revierte también programación, bandeja y outboxes. Entregas SMTP/FCM ocurren después, con leases y códigos genéricos de fallo. Ver prevention-reminders-dashboard.md.
+
+## Alcance actualizado por DN-17
+
+Los recursos clínicos de auditoría se filtran por la selección firmada y las clínicas autorizadas para audit:list/read: clínicas, pacientes, membresías, eventos preventivos, consumos, familiares e invitaciones vinculadas. Los registros de plataforma requieren grants globales; conceder auditoría local no los abre. La evidencia permanece inmutable aunque un operador pierda visibilidad. Ver clinic-context.md.

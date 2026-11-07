@@ -32,9 +32,9 @@ describe("Private GCS storage", () => {
   });
   it("rejects foreign keys, unsupported uploads and absent configuration", async () => {
     const storage = new GcsFileStorage(new ConfigService({}));
-    await expect(storage.signedReadUrl("../other")).rejects.toThrow("Invalid object key");
-    await expect(storage.upload(Buffer.from("bad"), "text/html")).rejects.toThrow("Unsupported file");
-    await expect(storage.upload(Buffer.alloc(10 * 1024 * 1024 + 1), "application/pdf")).rejects.toThrow("size");
-    await expect(storage.upload(Buffer.from("example"), "application/pdf")).rejects.toThrow("not configured");
+    await expect(storage.signedReadUrl("../other")).rejects.toThrow("La clave del archivo no es válida");
+    await expect(storage.upload(Buffer.from("bad"), "text/html")).rejects.toThrow("El archivo no está permitido");
+    await expect(storage.upload(Buffer.alloc(10 * 1024 * 1024 + 1), "application/pdf")).rejects.toThrow("límite");
+    await expect(storage.upload(Buffer.from("example"), "application/pdf")).rejects.toThrow("no está configurado");
   });
 });

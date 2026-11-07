@@ -18,12 +18,16 @@ export interface ClinicQuery extends Pagination {
   enabled?: boolean;
 }
 export interface ClinicStaffView {
+  roles?: string[];
+  name?: string;
+  email?: string;
   userId: string;
   clinicId: string;
   createdAt: Date;
 }
 /** Clinic catalog and transactional staff access boundary. Clinics are deactivated, never erased. */
 export abstract class ClinicRepository {
+  abstract available(query: ClinicQuery, actor: AccessActor): Promise<Page<ClinicView>>;
   abstract create(input: ClinicInput, actor: AccessActor): Promise<ClinicView>;
   abstract read(id: string, actor: AccessActor): Promise<ClinicView | null>;
   abstract list(query: ClinicQuery, actor: AccessActor): Promise<Page<ClinicView>>;
@@ -33,6 +37,6 @@ export abstract class ClinicRepository {
     actor: AccessActor
   ): Promise<ClinicView>;
   abstract staff(id: string, page: Pagination, actor: AccessActor): Promise<Page<ClinicStaffView>>;
-  abstract assign(id: string, userId: string, actor: AccessActor): Promise<void>;
+  abstract assign(id: string, userId: string, actor: AccessActor, roles: string[]): Promise<void>;
   abstract unassign(id: string, userId: string, actor: AccessActor): Promise<void>;
 }

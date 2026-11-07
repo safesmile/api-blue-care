@@ -1,10 +1,11 @@
-import { PushUseCase } from "../application/push.usecase";
+import { DrainPushUseCase } from "../application/drainPush.usecase";
 import { Body, Controller, Post, HttpCode, ServiceUnavailableException, UseGuards } from "@nestjs/common";
 import { IsUUID } from "class-validator";
 import { SkipThrottle } from "@nestjs/throttler";
 import { Public } from "../../auth/presentation/auth.decorators";
 import { GoogleJobGuard } from "../../../infrastructure/jobs/google-job.guard";
-import { NotificationsUseCase } from "../application/notifications.usecase";
+import { DeliverNotificationUseCase } from "../application/deliverNotification.usecase";
+import { DrainNotificationUseCase } from "../application/drainNotification.usecase";
 /**
  *
  */
@@ -18,13 +19,15 @@ export class DeliveryJobDto {
 @SkipThrottle()
 export class NotificationJobsController {
   /**
-   *
-   * @param notifications Notification application service.
-   * @param push Durable push delivery application service.
+   * Recibe las dependencias de la operación.
+   * @param deliverNotification Dependencia tipada de deliverNotification.
+   * @param drainNotification Dependencia tipada de drainNotification.
+   * @param drainPush Dependencia tipada de drainPush.
    */
   constructor(
-    private readonly notifications: NotificationsUseCase,
-    private readonly push: PushUseCase
+    private readonly deliverNotification: DeliverNotificationUseCase,
+    private readonly drainNotification: DrainNotificationUseCase,
+    private readonly drainPush: DrainPushUseCase
   ) {}
   /**
    *
@@ -34,7 +37,8 @@ export class NotificationJobsController {
   @Post("deliver")
   @HttpCode(204)
   async deliver(@Body() input: DeliveryJobDto) {
-    if (!(await this.notifications.deliver(input.id))) throw new ServiceUnavailableException("Delivery awaiting retry");
+    if (!(await this.deliverNotification.execute(input.id)))
+      throw new ServiceUnavailableException("El envío está pendiente de un nuevo intento");
   }
   /**
    *
@@ -43,8 +47,8 @@ export class NotificationJobsController {
   @Post("dispatch")
   @HttpCode(200)
   async dispatch() {
-    const email = await this.notifications.drain();
-    const push = await this.push.drain();
+    const email = await this.drainNotification.execute();
+    const push = await this.drainPush.execute();
     return { ...email, pushSent: push.sent };
   }
 }

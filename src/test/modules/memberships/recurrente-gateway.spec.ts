@@ -120,7 +120,7 @@ describe("RecurrenteGateway", () => {
     network.mockResolvedValue(response({ status: "cancelled" }));
     await gateway.stop("su_test", false);
     network.mockResolvedValue(response({ secret: "must-not-leak" }, 401));
-    await expect(gateway.stop("su_test", false)).rejects.toThrow("Recurrente operation could not be confirmed");
+    await expect(gateway.stop("su_test", false)).rejects.toThrow("No se pudo confirmar la operación con Recurrente");
   });
   it("uses provider checkout evidence rather than elapsed local time to close unpaid quotes", async () => {
     network.mockResolvedValue(response({ id: "ch_test", status: "expired", payment: null }));

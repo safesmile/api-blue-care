@@ -13,8 +13,8 @@ const PLAN_SELECT =
 @Injectable()
 export class SqlPlanRepository extends PlanRepository {
   /**
-   * Receives the persistence and policy boundaries.
-   * @param db PostgreSQL connection.
+   * Recibe las dependencias de la operación.
+   * @param db Dependencia tipada de db.
    */
   constructor(private readonly db: Sequelize) {
     super();
@@ -42,7 +42,7 @@ export class SqlPlanRepository extends PlanRepository {
         });
       });
     } catch (error) {
-      if (error instanceof UniqueConstraintError) throw new ConflictException("Plan code already exists");
+      if (error instanceof UniqueConstraintError) throw new ConflictException("El código del plan ya existe");
       throw error;
     }
     return (await this.read(id))!;
@@ -90,7 +90,7 @@ export class SqlPlanRepository extends PlanRepository {
         transaction,
         type: QueryTypes.SELECT
       });
-      if (!plan) throw new NotFoundException("Plan not found");
+      if (!plan) throw new NotFoundException("No se encontró el plan");
       const [next] = await this.db.query<{ number: number }>(
         'SELECT COALESCE(MAX(number),0)+1 AS number FROM plan_versions WHERE "planId"=:id',
         { replacements: { id }, transaction, type: QueryTypes.SELECT }
@@ -141,7 +141,7 @@ export class SqlPlanRepository extends PlanRepository {
    * @returns The persisted result or completion of the authorized operation.
    */
   async versions(id: string, page: Pagination) {
-    if (!(await this.read(id))) throw new NotFoundException("Plan not found");
+    if (!(await this.read(id))) throw new NotFoundException("No se encontró el plan");
     const items = await this.db.query<PlanVersion>(
       'SELECT * FROM plan_versions WHERE "planId"=:id ORDER BY number DESC LIMIT :limit OFFSET :offset',
       { replacements: { id, ...page }, type: QueryTypes.SELECT }
@@ -166,15 +166,15 @@ export class SqlPlanRepository extends PlanRepository {
         transaction,
         type: QueryTypes.SELECT
       });
-      if (!plan) throw new NotFoundException("Plan not found");
+      if (!plan) throw new NotFoundException("No se encontró el plan");
       if (plan.currentVersionId === versionId) return;
       const [version] = await this.db.query<PlanVersion>(
         'SELECT * FROM plan_versions WHERE id=:versionId AND "planId"=:id',
         { replacements: { id, versionId }, transaction, type: QueryTypes.SELECT }
       );
-      if (!version) throw new NotFoundException("Version does not belong to this plan");
+      if (!version) throw new NotFoundException("La versión no pertenece a este plan");
       if (version.publishedAt)
-        throw new ConflictException("Create a new revision instead of republishing historical terms");
+        throw new ConflictException("Cree una nueva versión; no se pueden volver a publicar condiciones históricas");
       await this.db.query('UPDATE plan_versions SET "publishedAt"=NOW() WHERE id=:versionId', {
         replacements: { versionId },
         transaction
@@ -208,7 +208,7 @@ export class SqlPlanRepository extends PlanRepository {
         transaction,
         type: QueryTypes.SELECT
       });
-      if (!before) throw new NotFoundException("Plan not found");
+      if (!before) throw new NotFoundException("No se encontró el plan");
       if (before.enabled === enabled) return;
       await this.db.query('UPDATE plans SET enabled=:enabled,"updatedAt"=NOW() WHERE id=:id', {
         replacements: { id, enabled },

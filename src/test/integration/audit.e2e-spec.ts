@@ -1,5 +1,6 @@
+import { ApiValidationPipe } from "../../shared/presentation/api-validation.pipe";
+import { AuthUseCase } from "../helpers/usecases/AuthUseCase";
 import { Test } from "@nestjs/testing";
-import { ValidationPipe } from "@nestjs/common";
 import { Sequelize } from "sequelize-typescript";
 import { QueryTypes } from "sequelize";
 import request from "supertest";
@@ -7,7 +8,7 @@ import { AppModule } from "../../app.module";
 import { createSuperUser } from "../../../scripts/lib/super-user";
 import { AccountMailer } from "../../modules/auth/domain/account-actions.repository";
 import { EmailSender } from "../../shared/domain/email-sender";
-import { NotificationsUseCase } from "../../modules/notifications/application/notifications.usecase";
+import { NotificationsUseCase } from "../helpers/usecases/NotificationsUseCase";
 import type { AuditRecord } from "../../modules/audit/domain/audit.repository";
 describe("Transactional audit and lifecycle outbox (disposable PostgreSQL)", () => {
   let app, db: Sequelize, rootToken: string, root, target, targetToken: string, role;
@@ -37,7 +38,7 @@ describe("Transactional audit and lifecycle outbox (disposable PostgreSQL)", () 
       .useValue({ send })
       .compile();
     app = module.createNestApplication();
-    app.useGlobalPipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }));
+    app.useGlobalPipes(new ApiValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }));
     await app.init();
     db = app.get(Sequelize);
     await createSuperUser(db, {
@@ -144,6 +145,7 @@ describe("Transactional audit and lifecycle outbox (disposable PostgreSQL)", () 
       .auth(rootToken, { type: "bearer" })
       .send({ roles: ["customer", role.name] })
       .expect(200);
+    targetToken = (await AuthUseCase.resolve(app).login(target.email, "Abcd123!")).token;
     await request(app.getHttpServer())
       .get("/audit/" + event.id)
       .auth(targetToken, { type: "bearer" })
@@ -240,7 +242,7 @@ describe("Transactional audit and lifecycle outbox (disposable PostgreSQL)", () 
     );
     expect(delivery.status).toBe("pending");
     expect(send).not.toHaveBeenCalled();
-    const notifications = app.get(NotificationsUseCase);
+    const notifications = NotificationsUseCase.resolve(app);
     expect(await notifications.deliver(delivery.id)).toBe(true);
     expect(await notifications.deliver(delivery.id)).toBe(true);
     expect(send).toHaveBeenCalledTimes(1);
@@ -256,7 +258,13 @@ describe("Transactional audit and lifecycle outbox (disposable PostgreSQL)", () 
     const created = await request(app.getHttpServer())
       .post("/auth/invitations")
       .auth(rootToken, { type: "bearer" })
-      .send({ firstName: "Audit", lastName: "Invitee", email: "audit-invitation@blue.test", roles: ["customer"] })
+      .send({
+        clinicAssignments: [],
+        firstName: "Audit",
+        lastName: "Invitee",
+        email: "audit-invitation@blue.test",
+        roles: ["customer"]
+      })
       .expect(201);
     const token = mail.find(e => e.email === "audit-invitation@blue.test")!.token;
     const [event] = await records("invitation.created", created.body.id);

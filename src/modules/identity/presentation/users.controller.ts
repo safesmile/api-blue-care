@@ -1,23 +1,55 @@
+import { CrudEntityController } from "../../../shared/presentation/crud.controller";
+import { PermissionCode } from "../../../shared/domain/permission-code";
 import { AuditReasonDto } from "../../../shared/presentation/audit-reason.dto";
 import type { AuthRequest } from "../../auth/presentation/auth.guard";
 import { IDENTITY_PERMISSIONS } from "../domain/identity.permissions";
 import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Patch, Post, Query, Req } from "@nestjs/common";
-import { CrudController } from "../../../shared/presentation/crud.controller";
-import { UsersUseCase } from "../application/users.usecase";
+import { CollaboratorsUserUseCase } from "../application/collaboratorsUser.usecase";
+import { CollaboratorUserUseCase } from "../application/collaboratorUser.usecase";
+import { CrudUsersUseCase } from "../application/crudUsers.usecase";
 import { CreateUserDto, UpdateUserDto, PaginationDto } from "./user.dto";
-import type { UserView } from "../domain/user";
 import { Permissions } from "../../auth/presentation/auth.decorators";
 /**
  * Exposes explicit user CRUD routes and their required permissions.
  */
 @Controller("users")
-export class UsersController extends CrudController<UserView, CreateUserDto, UpdateUserDto, AuthRequest> {
+export class UsersController extends CrudEntityController<CrudUsersUseCase> {
   /**
-   * Receives the dependencies required by this component.
-   * @param users User repository or user application service.
+   * Recibe las dependencias de la operación.
+   * @param collaboratorsUser Dependencia tipada de collaboratorsUser.
+   * @param collaboratorUser Dependencia tipada de collaboratorUser.
+   * @param users Dependencia tipada de users.
    */
-  constructor(private readonly users: UsersUseCase) {
-    super();
+  constructor(
+    private readonly collaboratorsUser: CollaboratorsUserUseCase,
+    private readonly collaboratorUser: CollaboratorUserUseCase,
+    users: CrudUsersUseCase
+  ) {
+    super(users);
+  }
+  /**
+   * Lists collaborators using clinic staff authority rather than global identity access.
+   * @param page Bounded pagination.
+   * @param request Current operator.
+   * @returns Visible staff records.
+   */
+  @Get("collaborators") @Permissions(PermissionCode.ClinicsStaffList) collaborators(
+    @Query() page: PaginationDto,
+    @Req() request: AuthRequest
+  ) {
+    return this.collaboratorsUser.execute(page, request.user);
+  }
+  /**
+   * Reads a collaborator using current clinic scope.
+   * @param id Target account.
+   * @param request Current operator.
+   * @returns Scoped staff record.
+   */
+  @Get("collaborators/:id") @Permissions(PermissionCode.ClinicsStaffList) collaborator(
+    @Param("id", ParseUUIDPipe) id: string,
+    @Req() request: AuthRequest
+  ) {
+    return this.collaboratorUser.execute(id, request.user);
   }
   /**
    * Creates the resource using the supplied input.
@@ -29,7 +61,7 @@ export class UsersController extends CrudController<UserView, CreateUserDto, Upd
     @Body() input: CreateUserDto,
     @Req() request: AuthRequest
   ) {
-    return this.users.create(input, request.user);
+    return this.crud("create", input, request.user);
   }
   /**
    * Returns the resource identified by its ID.
@@ -41,7 +73,7 @@ export class UsersController extends CrudController<UserView, CreateUserDto, Upd
     @Param("id", ParseUUIDPipe) id: string,
     @Req() request: AuthRequest
   ) {
-    return this.users.read(id, request.user);
+    return this.crud("read", id, request.user);
   }
   /**
    * Returns a bounded page of resources and its total count.
@@ -53,7 +85,7 @@ export class UsersController extends CrudController<UserView, CreateUserDto, Upd
     @Query() page: PaginationDto,
     @Req() request: AuthRequest
   ) {
-    return this.users.list(page, request.user);
+    return this.crud("list", page, request.user);
   }
   /**
    * Updates the permitted resource properties.
@@ -67,7 +99,7 @@ export class UsersController extends CrudController<UserView, CreateUserDto, Upd
     @Body() input: UpdateUserDto,
     @Req() request: AuthRequest
   ) {
-    return this.users.update(id, input, request.user);
+    return this.crud("update", id, input, request.user);
   }
   /**
    * Deletes the resource identified by its ID.
@@ -82,6 +114,6 @@ export class UsersController extends CrudController<UserView, CreateUserDto, Upd
     @Body() _input: AuditReasonDto = {}
   ) {
     void _input; // The validated body supplies only the optional audit reason.
-    return this.users.delete(id, request.user);
+    return this.crud("delete", id, request.user);
   }
 }

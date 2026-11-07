@@ -1,5 +1,6 @@
+import { ApiValidationPipe } from "../../shared/presentation/api-validation.pipe";
+import { assignClinicOperator } from "../helpers/clinic-operator.fixture";
 import { Test } from "@nestjs/testing";
-import { ValidationPipe } from "@nestjs/common";
 import { Sequelize } from "sequelize-typescript";
 import { QueryTypes } from "sequelize";
 import request from "supertest";
@@ -54,7 +55,7 @@ describe("Patients, clinics and verified account binding (disposable PostgreSQL)
       .useValue({ send })
       .compile();
     app = module.createNestApplication();
-    app.useGlobalPipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }));
+    app.useGlobalPipes(new ApiValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }));
     await app.init();
     db = app.get(Sequelize);
     await createSuperUser(db, {
@@ -86,7 +87,9 @@ describe("Patients, clinics and verified account binding (disposable PostgreSQL)
         })
         .expect(201)
     ).body;
+    await assignClinicOperator(app, rootToken, clinicA.id);
     clinicB = (await api().post("/clinics").send({ code: "suite-south", name: "South" }).expect(201)).body;
+    await assignClinicOperator(app, rootToken, clinicB.id);
     await api().post("/clinics").send({ code: "suite-north", name: "Duplicate" }).expect(409);
     patientA = (
       await api()
@@ -162,6 +165,7 @@ describe("Patients, clinics and verified account binding (disposable PostgreSQL)
     ({ user: staff, token: staffToken } = await account("patient-staff@blue.test", ["suite-clinic-staff"]));
     await api()
       .put("/clinics/" + clinicA.id + "/staff/" + staff.id)
+      .send({ roles: ["customer"] })
       .expect(204);
     const catalog = await api(staffToken).get("/clinics").expect(200);
     expect(catalog.body.items.map(item => item.id)).toEqual([clinicA.id]);
@@ -187,6 +191,7 @@ describe("Patients, clinics and verified account binding (disposable PostgreSQL)
     await api(staffToken).post("/clinics").send({ code: "suite-unauthorized", name: "Denied" }).expect(403);
     await api(staffToken)
       .put("/clinics/" + clinicB.id + "/staff/" + staff.id)
+      .send({ roles: ["customer"] })
       .expect(403);
     await api(staffToken)
       .put("/patients/" + patientB.id + "/clinics/" + clinicA.id)
@@ -198,12 +203,13 @@ describe("Patients, clinics and verified account binding (disposable PostgreSQL)
       .expect(204);
     await api(staffToken)
       .get("/patients/" + patientA.id)
-      .expect(404);
+      .expect(403);
     await api(staffToken)
       .get("/clinics/" + clinicA.id)
       .expect(403);
     await api()
       .put("/clinics/" + clinicA.id + "/staff/" + staff.id)
+      .send({ roles: ["customer"] })
       .expect(204);
     await api()
       .put("/patients/" + patientB.id + "/clinics/" + clinicA.id)
@@ -276,12 +282,18 @@ describe("Patients, clinics and verified account binding (disposable PostgreSQL)
       roles: ["customer"]
     };
     // This operator holds a linking grant but has no access to the patient's clinic.
-    await api(staffToken).post("/auth/invitations").send(input).expect(403);
+    await api(staffToken)
+      .post("/auth/invitations")
+      .send({ clinicAssignments: [], ...input })
+      .expect(403);
     await api()
       .post("/auth/invitations")
-      .send({ ...input, email: "wrong@blue.test" })
+      .send({ clinicAssignments: [], ...input, email: "wrong@blue.test" })
       .expect(409);
-    await api().post("/auth/invitations").send(input).expect(201);
+    await api()
+      .post("/auth/invitations")
+      .send({ clinicAssignments: [], ...input })
+      .expect(201);
     expect((await api().get("/patients/" + patient.id)).body.userId).toBeNull();
     const token = mail.findLast(item => item.email === patient.email && item.kind === "invite")!.token;
     await request(app.getHttpServer()).post("/auth/invitations/accept").send({ token, password }).expect(204);
@@ -401,6 +413,7 @@ describe("Patients, clinics and verified account binding (disposable PostgreSQL)
     await api(staffToken)
       .post("/auth/invitations")
       .send({
+        clinicAssignments: [],
         patientId: patient.id,
         email: patient.email,
         firstName: patient.firstName,
@@ -421,6 +434,7 @@ describe("Patients, clinics and verified account binding (disposable PostgreSQL)
     expect((await api().get("/patients/" + patient.id)).body.userId).toBeNull();
     await api()
       .put("/clinics/" + clinicA.id + "/staff/" + staff.id)
+      .send({ roles: ["customer"] })
       .expect(204);
     await request(app.getHttpServer()).post("/auth/invitations/accept").send({ token, password }).expect(204);
   });
@@ -458,11 +472,11 @@ describe("Patients, clinics and verified account binding (disposable PostgreSQL)
       .expect(200);
     await api(staffToken)
       .get("/patients/" + patientA.id)
-      .expect(404);
+      .expect(403);
     await api().post("/patients").send({ clinicId: clinicA.id, firstName: "No", lastName: "Registration" }).expect(409);
     await api()
       .get("/patients/" + patientA.id)
-      .expect(200);
+      .expect(404);
     await api()
       .delete("/patients/" + patientA.id)
       .expect(404);

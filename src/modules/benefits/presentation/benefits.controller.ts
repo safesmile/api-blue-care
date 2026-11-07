@@ -1,5 +1,12 @@
+import { CrudEntityController } from "../../../shared/presentation/crud.controller";
+import { PermissionCode } from "../../../shared/domain/permission-code";
 import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Put, Query, Req } from "@nestjs/common";
-import { BenefitsUseCase } from "../application/benefits.usecase";
+import { CrudBenefitsUseCase } from "../application/crudBenefits.usecase";
+import { VersionBenefitUseCase } from "../application/versionBenefit.usecase";
+import { VersionsBenefitUseCase } from "../application/versionsBenefit.usecase";
+import { PublishBenefitUseCase } from "../application/publishBenefit.usecase";
+import { FamilySettingsBenefitUseCase } from "../application/familySettingsBenefit.usecase";
+import { UpdateFamilySettingsBenefitUseCase } from "../application/updateFamilySettingsBenefit.usecase";
 import { CreateBenefitDto, BenefitVersionDto, BenefitQueryDto, FamilySettingsDto } from "./benefits.dto";
 import { AuditReasonDto } from "../../../shared/presentation/audit-reason.dto";
 import { PaginationDto } from "../../identity/presentation/user.dto";
@@ -7,20 +14,37 @@ import { Permissions } from "../../auth/presentation/auth.decorators";
 import type { AuthRequest } from "../../auth/presentation/auth.guard";
 /** Explicit revision and family-limit administration; no mutation of published history. */
 @Controller("benefits")
-export class BenefitsController {
+export class BenefitsController extends CrudEntityController<CrudBenefitsUseCase> {
   /**
-   * Initializes the benefit service dependencies.
-   * @param benefits Benefit configuration repository or application service.
+   * Recibe las dependencias de la operación.
+   * @param benefits Dependencia tipada de benefits.
+   * @param versionBenefit Dependencia tipada de versionBenefit.
+   * @param versionsBenefit Dependencia tipada de versionsBenefit.
+   * @param publishBenefit Dependencia tipada de publishBenefit.
+   * @param familySettingsBenefit Dependencia tipada de familySettingsBenefit.
+   * @param updateFamilySettingsBenefit Dependencia tipada de updateFamilySettingsBenefit.
    */
-  constructor(private readonly benefits: BenefitsUseCase) {}
+  constructor(
+    benefits: CrudBenefitsUseCase,
+    private readonly versionBenefit: VersionBenefitUseCase,
+    private readonly versionsBenefit: VersionsBenefitUseCase,
+    private readonly publishBenefit: PublishBenefitUseCase,
+    private readonly familySettingsBenefit: FamilySettingsBenefitUseCase,
+    private readonly updateFamilySettingsBenefit: UpdateFamilySettingsBenefitUseCase
+  ) {
+    super(benefits);
+  }
   /**
    * Creates a stable benefit definition.
    * @param input Validated operation fields.
    * @param request Request containing the authenticated identity.
    * @returns The persisted result or completion of the authorized operation.
    */
-  @Post() @Permissions("benefits:create") create(@Body() input: CreateBenefitDto, @Req() request: AuthRequest) {
-    return this.benefits.create(input, request.user);
+  @Post() @Permissions(PermissionCode.BenefitsCreate) create(
+    @Body() input: CreateBenefitDto,
+    @Req() request: AuthRequest
+  ) {
+    return this.crud("create", input, request.user);
   }
   /**
    * Lists the authorized benefit catalog.
@@ -28,8 +52,8 @@ export class BenefitsController {
    * @param request Request containing the authenticated identity.
    * @returns The persisted result or completion of the authorized operation.
    */
-  @Get() @Permissions("benefits:list") list(@Query() query: BenefitQueryDto, @Req() request: AuthRequest) {
-    return this.benefits.list(query, request.user);
+  @Get() @Permissions(PermissionCode.BenefitsList) list(@Query() query: BenefitQueryDto, @Req() request: AuthRequest) {
+    return this.crud("list", query, request.user);
   }
   /**
    * Reads the configured additional-family limit.
@@ -37,11 +61,11 @@ export class BenefitsController {
    * @param request Request containing the authenticated identity.
    * @returns The persisted result or completion of the authorized operation.
    */
-  @Get("plans/:id/family-settings") @Permissions("benefits:read") familySettings(
+  @Get("plans/:id/family-settings") @Permissions(PermissionCode.BenefitsRead) familySettings(
     @Param("id", ParseUUIDPipe) id: string,
     @Req() request: AuthRequest
   ) {
-    return this.benefits.familySettings(id, request.user);
+    return this.familySettingsBenefit.execute(id, request.user);
   }
   /**
    * Changes the family limit without deleting existing relatives.
@@ -50,12 +74,12 @@ export class BenefitsController {
    * @param request Request containing the authenticated identity.
    * @returns The persisted result or completion of the authorized operation.
    */
-  @Put("plans/:id/family-settings") @Permissions("benefits:family-settings") updateFamilySettings(
+  @Put("plans/:id/family-settings") @Permissions(PermissionCode.BenefitsFamilySettings) updateFamilySettings(
     @Param("id", ParseUUIDPipe) id: string,
     @Body() input: FamilySettingsDto,
     @Req() request: AuthRequest
   ) {
-    return this.benefits.updateFamilySettings(id, input.maxBeneficiaries, request.user);
+    return this.updateFamilySettingsBenefit.execute(id, input.maxBeneficiaries, request.user);
   }
   /**
    * Reads a benefit definition and its published revision.
@@ -63,8 +87,11 @@ export class BenefitsController {
    * @param request Request containing the authenticated identity.
    * @returns The persisted result or completion of the authorized operation.
    */
-  @Get(":id") @Permissions("benefits:read") read(@Param("id", ParseUUIDPipe) id: string, @Req() request: AuthRequest) {
-    return this.benefits.read(id, request.user);
+  @Get(":id") @Permissions(PermissionCode.BenefitsRead) read(
+    @Param("id", ParseUUIDPipe) id: string,
+    @Req() request: AuthRequest
+  ) {
+    return this.crud("read", id, request.user);
   }
   /**
    * Appends an immutable rule revision.
@@ -73,12 +100,12 @@ export class BenefitsController {
    * @param request Request containing the authenticated identity.
    * @returns The persisted result or completion of the authorized operation.
    */
-  @Post(":id/versions") @Permissions("benefits:version") version(
+  @Post(":id/versions") @Permissions(PermissionCode.BenefitsVersion) version(
     @Param("id", ParseUUIDPipe) id: string,
     @Body() input: BenefitVersionDto,
     @Req() request: AuthRequest
   ) {
-    return this.benefits.version(id, input, request.user);
+    return this.versionBenefit.execute(id, input, request.user);
   }
   /**
    * Lists immutable rule revisions.
@@ -87,12 +114,12 @@ export class BenefitsController {
    * @param request Request containing the authenticated identity.
    * @returns The persisted result or completion of the authorized operation.
    */
-  @Get(":id/versions") @Permissions("benefits:read") versions(
+  @Get(":id/versions") @Permissions(PermissionCode.BenefitsRead) versions(
     @Param("id", ParseUUIDPipe) id: string,
     @Query() page: PaginationDto,
     @Req() request: AuthRequest
   ) {
-    return this.benefits.versions(id, page, request.user);
+    return this.versionsBenefit.execute(id, page, request.user);
   }
   /**
    * Publishes the revision for all current and future members.
@@ -102,13 +129,13 @@ export class BenefitsController {
    * @param request Request containing the authenticated identity.
    * @returns The persisted result or completion of the authorized operation.
    */
-  @Post(":id/versions/:versionId/publish") @Permissions("benefits:publish") publish(
+  @Post(":id/versions/:versionId/publish") @Permissions(PermissionCode.BenefitsPublish) publish(
     @Param("id", ParseUUIDPipe) id: string,
     @Param("versionId", ParseUUIDPipe) versionId: string,
     @Body() input: AuditReasonDto,
     @Req() request: AuthRequest
   ) {
     void input;
-    return this.benefits.publish(id, versionId, request.user);
+    return this.publishBenefit.execute(id, versionId, request.user);
   }
 }

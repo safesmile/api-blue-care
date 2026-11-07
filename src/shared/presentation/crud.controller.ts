@@ -1,33 +1,21 @@
-import type { Page, Pagination } from "../domain/crud.repository";
-// No route decorators: endpoints and permissions belong to concrete controllers.
-/**
- * Declares explicit CRUD operations for concrete implementations.
- */
-export abstract class CrudController<View, Create, Update, Context = unknown> {
+import type { CrudOperations } from "../application/entity.usecase";
+/** Comparte la delegación CRUD; cada controlador declara sus rutas, DTO y permisos explícitos. */
+export abstract class CrudEntityController<Port extends CrudOperations> {
   /**
-   * Creates the resource using the supplied input.
-   * @param input Validated input for this operation.
+   * Recibe las dependencias de la operación.
+   * @param resource Dependencia tipada de resource.
    */
-  abstract create(input: Create, context: Context): Promise<View>;
+  protected constructor(private readonly resource: Port) {}
   /**
-   * Returns the resource identified by its ID.
-   * @param id Resource identifier.
+   * Delega sin duplicar lógica de aplicación en los controladores.
+   * @param action Operación disponible.
+   * @param args Entradas concretas de la operación.
+   * @returns Resultado concreto del caso de uso.
    */
-  abstract read(id: string, context: Context): Promise<View>;
-  /**
-   * Returns a bounded page of resources and its total count.
-   * @param page Bounded pagination values.
-   */
-  abstract list(page: Pagination, context: Context): Promise<Page<View>>;
-  /**
-   * Updates the permitted resource properties.
-   * @param id Resource identifier.
-   * @param input Validated input for this operation.
-   */
-  abstract update(id: string, input: Update, context: Context): Promise<View>;
-  /**
-   * Deletes the resource identified by its ID.
-   * @param id Resource identifier.
-   */
-  abstract delete(id: string, context: Context): Promise<void>;
+  protected crud<Key extends keyof Port & keyof CrudOperations>(
+    action: Key,
+    ...args: Parameters<NonNullable<Port[Key]>>
+  ): ReturnType<NonNullable<Port[Key]>> {
+    return this.resource[action]!(...args);
+  }
 }

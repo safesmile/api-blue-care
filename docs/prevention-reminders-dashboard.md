@@ -116,3 +116,7 @@ En nube: provisionar explícitamente `npm run gcp:scheduler:sync -- --prevention
 Límites pendientes de configuración externa: proyecto Google/Firebase, credenciales y dispositivos reales; aplicación frontend y autorización de push. No se hicieron envíos reales, cargos ni provisión de recursos de nube. La integración clínica y la retención/purga de historia siguen fuera de esta implementación.
 
 Verificación final del paso 7 (04/11/2026): 261 pruebas unitarias en 57 suites y 92 pruebas de integración en 9 suites aprobadas. Cobertura de casos de uso/controladores: 100% líneas/sentencias/funciones y 82.57% ramas. Compilación, tipos, lint sin advertencias y formato aprobados. PostgreSQL de pruebas desechable detenido al terminar; correo y FCM sustituidos, sin tocar la base del usuario ni servicios reales.
+
+## Alcance actualizado por DN-17
+
+La clínica del JWT/sesión y los roles de cada sede se aplican automáticamente al dashboard y prevención. El permiso de una sede no se utiliza sobre eventos de otra, incluso con paciente compartido y vista Todas. clinics:all ya no elimina asignaciones clínicas. Los filtros explícitos solo restringen la selección firmada. Ver clinic-context.md para los contratos de login/cambio y los efectos inmediatos de revocación.

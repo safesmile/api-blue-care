@@ -1,3 +1,4 @@
+import { clinicScopeParams } from "../../clinics/infrastructure/clinic-scope";
 import { Injectable } from "@nestjs/common";
 import { Sequelize } from "sequelize-typescript";
 import { QueryTypes, Transaction } from "sequelize";
@@ -10,14 +11,14 @@ const PATIENT_FILTER = `p.enabled AND ${PATIENT_SCOPE_SQL} AND (CAST(:clinicId A
 const ACTIVE = 'm."periodStart"<=:now AND m."paidThrough"> :now AND m."suspendedAt" IS NULL AND m."closedAt" IS NULL';
 const EVENT_FILTER = `p.enabled AND c.enabled AND ${PATIENT_SCOPE_SQL} AND e.status IN ('planned','scheduled')
  AND (CAST(:clinicId AS UUID) IS NULL OR e."clinicId"=:clinicId)
- AND (:all OR EXISTS(SELECT 1 FROM clinic_staff s WHERE s."clinicId"=e."clinicId" AND s."userId"=:actorId))`;
+ AND blue_care_clinic_allowed(:actorId,e."clinicId",CAST(:currentClinicId AS UUID),CAST(:clinicPermission AS TEXT))`;
 /** Consistent PostgreSQL snapshots keep metrics and their filtered lists concordant. */
 @Injectable()
 export class SqlDashboardRepository extends DashboardRepository {
   /**
-   * Receives the explicit persistence and transport dependencies.
-   * @param db PostgreSQL connection.
-   * @param clinics Explicit clinics value for this operation.
+   * Recibe las dependencias de la operación.
+   * @param db Dependencia tipada de db.
+   * @param clinics Dependencia tipada de clinics.
    */
   constructor(
     private readonly db: Sequelize,
@@ -124,8 +125,7 @@ export class SqlDashboardRepository extends DashboardRepository {
     return {
       ...query,
       clinicId: query.clinicId ?? null,
-      actorId: actor.id,
-      all: actor.permissions.includes("clinics:all"),
+      ...clinicScopeParams(actor),
       now: clock.now,
       until: new Date(clock.now.getTime() + query.days * 86400000)
     };

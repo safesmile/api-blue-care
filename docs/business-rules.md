@@ -143,3 +143,60 @@ Fuente: respuestas expresas del dueño durante el paso 7.
 - El trabajo solicitado en esta etapa es backend; las pantallas se implementarán después.
 
 Decisión técnica de esta implementación: los plazos se configuran por evento en horas de anticipación y se heredan al siguiente evento del paciente. No se exige membresía para prevención. Una próxima fecha calculada es una sugerencia, no una reserva de cita externa. FCM se prepara como adaptador de push mediante ADC, deshabilitado hasta configurar Firebase/dispositivos. Detalles, contratos y limitaciones: prevention-reminders-dashboard.md. No se introducen excepciones a las reglas de membresías o beneficios.
+
+
+## DN-17 — Roles por clínica y sesión contextual (05/11/2026)
+
+Fuente: instrucción expresa del dueño durante la implementación del frontend.
+
+- Una persona puede tener roles distintos por clínica: recepción en A y administración en B. La asignación de user_roles debe incluir el ámbito de clínica.
+- La sesión/JWT debe identificar la clínica seleccionada y el guard debe colocar ese contexto en req.user. Cambiar de clínica emite credenciales con otro contexto.
+- Todas significa únicamente las clínicas asignadas, con sus permisos concretos. No abre sedes no asignadas y reemplaza la interpretación anterior de clinics:all como bypass clínico.
+- Administración concede/retira acceso a personal inmediatamente y notifica al usuario. Invitaciones de colaboradores declaran clínicas y roles de destino.
+- Se permite una cuenta sin clínicas; no obtiene información de sedes por ese motivo.
+- El dueño autoriza modificar las migraciones existentes y volver a ejecutarlas porque la base tiene datos ficticios. No crear una nueva migración para estos cambios.
+
+Decisiones técnicas: clinicId null representa Todas; cambio de contexto rota sesión/JWT/refresh sin ampliar duración absoluta; permisos y asignaciones se revalidan en SQL. Gestión global de asignaciones/catálogos de plataforma no equivale a acceso a registros clínicos sin asignación. La propiedad del paciente y el saldo global de membresía se conservan. Contratos, límites y operación: clinic-context.md. Esta decisión sustituye los puntos de DN-13 y documentación previa incompatibles con roles por sede/bypass global; no modifica precios, períodos ni beneficios.
+
+## DN-18 — Identidad compartida y modos paciente/personal (05/11/2026)
+
+Fuente: el dueño confirmó implementar la separación propuesta y adaptar autenticación/selector/perfil del frontend.
+
+- Pacientes consultan información propia sin asignación de personal ni clínica en el JWT. Ser paciente no requiere membresía.
+- Personal conserva roles por sede y selección firmada; Todas sigue limitada a asignadas y al permiso de cada operación.
+- Una identidad puede tener ambos contextos. Cambiar modo renueva credenciales, revalida autoridad y conserva la duración absoluta de sesión.
+- Sin clínicas registradas o asignadas, personal conserva acceso al perfil y se muestra No hay clínicas seleccionadas, tanto en el selector como en el perfil. No se selecciona una sede ficticia.
+- La condición de colaborador se conserva al quitar su última clínica. Invitaciones pueden declarar staff:true y clinicAssignments:[] para personal todavía sin sedes.
+
+Decisiones técnicas y contratos: clinic-context.md. Esta precisión sustituye la interpretación universal de clinicId en DN-17: el campo pertenece al modo staff. No modifica la propiedad de datos del paciente, el saldo global, ni las reglas comerciales.
+
+## DN-19 — Contexto automático, sin cambio de tipo por el usuario (06/11/2026)
+
+Fuente: el dueño solicita retirar el selector paciente/personal, porque no es necesario en su flujo, y mejorar el diseño del selector de clínica.
+
+- El usuario no puede elegir ni cambiar su tipo de acceso. Se retira el selector y la API de alternancia; login no admite un modo elegido por el cliente.
+- El backend determina el contexto por los perfiles/permisos vigentes al iniciar sesión. Se conserva el discriminador interno firmado y persistido para validar la sesión.
+- El personal únicamente selecciona clínica o Todas las asignadas, manteniendo autorización por sede; paciente sigue sin clínica en el JWT.
+- El selector de clínicas usa el componente visual accesible del panel, con menú personalizado, opción marcada, teclado y tema oscuro. Sin clínicas sigue deshabilitado y el perfil conserva el aviso.
+
+Esta corrección prevalece sobre la alternancia pública propuesta en DN-18; no modifica las reglas de membresía, la propiedad personal ni la matriz de roles por clínica.
+
+## DN-20 — Gestión separada de colaboradores y pacientes (06/11/2026)
+
+Fuente: el dueño pide pantallas y formularios de página completa distintos, con endpoints separados cuando sea necesario.
+
+- Colaboradores: invitar con una clínica y un rol de trabajo permitido por la autoridad del invitador. El rol se limita a esa sede; no se conceden roles administrativos globales desde este flujo.
+- Pacientes: no se eligen roles ni asignaciones de personal. El backend fija el rol personal Paciente (nombre interno customer), sin acceso a datos de clínicas.
+- Confirmación expresa posterior: usar la clínica actual para vincular la ficha del paciente; si está en Todas, pedir seleccionar una clínica antes de invitar. Esa asociación delimita gestión del personal y no da permisos al paciente.
+- Formularios de invitación, edición y gestión de accesos en páginas propias, sin modales para estas acciones.
+- Autorizado modificar endpoints y migraciones existentes según sea necesario. Se conserva la condición de colaborador al quedar sin clínicas y no se reintroduce selección del tipo de usuario.
+
+Decisiones técnicas: rol básico protegido staff para seguridad/bandeja propias, separado de roles por sede; discriminator invitations.kind; creación/reutilización de ficha e invitación transaccionales; aceptación verifica el contacto y mantiene propiedad. Nuevo paciente no requiere roles:assign porque el rol fijo no es una delegación arbitraria. Contratos y límites: people-management.md. No se cambia la matriz pendiente de permisos por cargo, precios, beneficios ni membresías.
+
+## DN-21 — Lectura de pacientes para administradores (06/11/2026)
+
+El dueño confirmó que el rol inicial admin puede listar y leer fichas de pacientes en sus clínicas asignadas. Se conceden patients:list y patients:read. Se conserva el alcance de la clínica seleccionada, o la unión de las clínicas asignadas con «Todas». No se conceden permisos adicionales para crear, editar, vincular o invitar pacientes. Esta decisión no define el resto de la matriz de roles.
+
+## DN-22 — Invitación de pacientes por administradores (06/11/2026)
+
+El dueño solicita que admin pueda invitar pacientes, reenviar invitaciones y revocarlas. El flujo existente requiere patients:create para registrar la ficha nueva y patients:link para vincularla al aceptar. Se incorporan ambos permisos al rol inicial, junto con los permisos de invitaciones ya existentes. Se aplica el alcance por clínica. El frontend confirma envío, reenvío y revocación mediante un modal y muestra resultados con toasts.

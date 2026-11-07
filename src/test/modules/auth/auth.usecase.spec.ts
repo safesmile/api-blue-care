@@ -1,8 +1,9 @@
+import { clinicContextFixture } from "../../helpers/clinic-context.fixture";
 import { ConfigService } from "@nestjs/config";
 import { JwtService } from "@nestjs/jwt";
 import { UnauthorizedException } from "@nestjs/common";
 import { createHash } from "node:crypto";
-import { AuthUseCase } from "../../../modules/auth/application/auth.usecase";
+import { AuthUseCase } from "../../helpers/usecases/AuthUseCase";
 import type { SessionRepository, Session } from "../../../modules/auth/domain/session.repository";
 import { identityFixture, userFixture } from "../../helpers/identity.fixture";
 describe("AuthUseCase", () => {
@@ -10,8 +11,10 @@ describe("AuthUseCase", () => {
   let sessions: jest.Mocked<SessionRepository>;
   let jwt: JwtService;
   let useCase: AuthUseCase;
+  let contexts: ReturnType<typeof clinicContextFixture>;
   const current: Session = {
     id: "session",
+    mode: "staff",
     userId: userFixture().id,
     tokenHash: "hash",
     expiresAt: new Date(Date.now() + 10000),
@@ -22,6 +25,7 @@ describe("AuthUseCase", () => {
     dependencies = identityFixture();
     sessions = { create: jest.fn(), rotate: jest.fn(), revoke: jest.fn(), isActive: jest.fn() };
     jwt = new JwtService({ secret: "test-secret" });
+    contexts = clinicContextFixture();
     useCase = new AuthUseCase(
       dependencies.users,
       dependencies.passwords,
@@ -31,7 +35,8 @@ describe("AuthUseCase", () => {
         ACCESS_TOKEN_SECONDS: "900",
         REFRESH_TOKEN_SECONDS: "604800",
         SESSION_MAX_SECONDS: "2592000"
-      })
+      }),
+      contexts
     );
   });
   it("issues a signed token and persists only the refresh hash", async () => {
@@ -105,5 +110,57 @@ describe("AuthUseCase", () => {
       return false;
     });
     await expect(useCase.refresh("old")).rejects.toBeInstanceOf(UnauthorizedException);
+  });
+  it("binds selected clinic claims and preserves them through refresh without accepting another session owner", async () => {
+    const user = userFixture();
+    dependencies.users.findByEmail.mockResolvedValue(user);
+    dependencies.users.read.mockResolvedValue(user);
+    const clinicId = "ba50a6d7-3ec5-4fb0-9145-2febbfaf8de8";
+    const login = await useCase.login(user.props.email, "password", clinicId);
+    expect(jwt.verify(login.token, { issuer: "blue-dent", audience: "blue-dent-api" }).clinicId).toBe(clinicId);
+    sessions.rotate.mockImplementation(async (_hash, replace) => !!(await replace({ ...current, clinicId })));
+    expect((await useCase.refresh("refresh")).clinicId).toBe(clinicId);
+    expect((await useCase.refresh("refresh", null, current.userId, current.id)).clinicId).toBeNull();
+    await expect(useCase.refresh("refresh", null, "other-user", current.id)).rejects.toThrow(UnauthorizedException);
+    await expect(useCase.refresh("refresh", null, current.userId, "other-session")).rejects.toThrow(
+      UnauthorizedException
+    );
+  });
+  it("omits clinic claims for patient credentials and preserves that mode on refresh", async () => {
+    const user = userFixture();
+    dependencies.users.findByEmail.mockResolvedValue(user);
+    dependencies.users.read.mockResolvedValue(user);
+    contexts.resolve.mockResolvedValueOnce({
+      ...user.toView(),
+      mode: "patient",
+      globalRoles: [],
+      globalPermissions: [],
+      clinics: []
+    });
+    const login = await useCase.login(user.props.email, "password");
+    expect(jwt.verify(login.token)).toMatchObject({ mode: "patient" });
+    expect(jwt.verify(login.token)).not.toHaveProperty("clinicId");
+    sessions.rotate.mockImplementation(async (_hash, replace) => !!(await replace({ ...current, mode: "patient" })));
+    const result = await useCase.refresh("refresh");
+    expect(result).not.toHaveProperty("clinicId");
+    expect(result.user?.mode).toBe("patient");
+  });
+  it("drops a removed clinic selection on refresh without widening an explicit selection", async () => {
+    const user = userFixture();
+    dependencies.users.read.mockResolvedValue(user);
+    contexts.resolve.mockResolvedValueOnce({
+      ...user.toView(),
+      clinicId: "removed",
+      mode: "staff",
+      globalRoles: [],
+      globalPermissions: [],
+      clinics: []
+    });
+    sessions.rotate.mockImplementation(
+      async (_hash, replace) => !!(await replace({ ...current, clinicId: "removed" }))
+    );
+    const result = await useCase.refresh("refresh");
+    expect(result.clinicId).toBeNull();
+    expect(contexts.resolve).toHaveBeenLastCalledWith(user.toView(), null, true, "staff");
   });
 });

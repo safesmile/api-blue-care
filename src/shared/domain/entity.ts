@@ -4,9 +4,9 @@ import { randomUUID } from "node:crypto";
  */
 export abstract class Entity<P> {
   /**
-   * Receives the dependencies required by this component.
-   * @param props Value required by this operation.
-   * @param id Resource identifier.
+   * Recibe las dependencias de la operación.
+   * @param props Dependencia tipada de props.
+   * @param id Dependencia tipada de id.
    */
   constructor(
     public readonly props: P,

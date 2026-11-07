@@ -16,10 +16,10 @@ import { SessionModel } from "./session.model";
 @Injectable()
 export class SequelizeAccountActionsRepository extends AccountActionsRepository {
   /**
-   * Receives the dependencies required by this component.
-   * @param actions Account action repository or application service.
-   * @param db Database connection used to coordinate transactions.
-   * @param authorization Resolves current role memberships.
+   * Recibe las dependencias de la operación.
+   * @param actions Dependencia tipada de actions.
+   * @param db Dependencia tipada de db.
+   * @param authorization Dependencia tipada de authorization.
    */
   constructor(
     @InjectModel(AccountActionModel) private readonly actions: typeof AccountActionModel,
@@ -140,7 +140,8 @@ export class SequelizeAccountActionsRepository extends AccountActionsRepository 
         return true;
       });
     } catch (error) {
-      if (error instanceof UniqueConstraintError) throw new ConflictException("Email already registered");
+      if (error instanceof UniqueConstraintError)
+        throw new ConflictException("El correo electrónico ya está registrado");
       throw error;
     }
   }

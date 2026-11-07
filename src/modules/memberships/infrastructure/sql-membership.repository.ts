@@ -1,3 +1,4 @@
+import { clinicScopeParams } from "../../clinics/infrastructure/clinic-scope";
 import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import { Sequelize } from "sequelize-typescript";
 import { QueryTypes, UniqueConstraintError, type Transaction } from "sequelize";
@@ -33,8 +34,8 @@ const ACCESS = '((:own AND p."userId"=:actorId) OR (NOT :own AND ' + PATIENT_SCO
 @Injectable()
 export class SqlMembershipRepository extends MembershipRepository {
   /**
-   * Receives the persistence and policy boundaries.
-   * @param db PostgreSQL connection.
+   * Recibe las dependencias de la operación.
+   * @param db Dependencia tipada de db.
    */
   constructor(private readonly db: Sequelize) {
     super();
@@ -55,8 +56,8 @@ export class SqlMembershipRepository extends MembershipRepository {
           transaction,
           type: QueryTypes.SELECT
         });
-        if (!patient || (own && patient.userId !== actor.id)) throw new NotFoundException("Patient not found");
-        if (!patient.enabled) throw new ConflictException("Patient is inactive");
+        if (!patient || (own && patient.userId !== actor.id)) throw new NotFoundException("No se encontró el paciente");
+        if (!patient.enabled) throw new ConflictException("El paciente está inactivo");
         if (!own) await requirePatientScope(this.db, transaction, patient.id, actor);
         const prior = await this.db.query<MembershipRecord>(
           'SELECT * FROM memberships WHERE "patientId"=:patientId AND "closedAt" IS NULL FOR UPDATE',
@@ -77,14 +78,14 @@ export class SqlMembershipRepository extends MembershipRepository {
               transaction,
               membershipChange("membership.closed", record.id, record, { ...record, closedAt: new Date() }, actor.id)
             );
-          } else throw new ConflictException("Patient already has an open membership; renew that contract instead");
+          } else throw new ConflictException("El paciente ya tiene una membresía abierta; renueve ese contrato");
         }
         const [version] = await this.db.query<PlanVersion>(
           `SELECT v.* FROM plan_versions v JOIN plans p ON p.id=v."planId"
           WHERE v.id=:versionId AND p.enabled AND p."currentVersionId"=v.id AND v."publishedAt" IS NOT NULL FOR SHARE OF p`,
           { replacements: { versionId: input.planVersionId }, transaction, type: QueryTypes.SELECT }
         );
-        if (!version) throw new ConflictException("Select the current published version of an enabled plan");
+        if (!version) throw new ConflictException("Seleccione la versión publicada vigente de un plan habilitado");
         const amountCents = input.cadence === "annual" ? version.annualPriceCents : version.monthlyPriceCents;
         const [record] = await this.db.query<MembershipRecord>(
           `INSERT INTO memberships (id,"patientId","planVersionId",cadence,"amountCents",currency,"createdAt")
@@ -98,7 +99,8 @@ export class SqlMembershipRepository extends MembershipRepository {
         await recordChange(this.db, transaction, membershipChange("membership.created", id, null, record, actor.id));
       });
     } catch (error) {
-      if (error instanceof UniqueConstraintError) throw new ConflictException("Patient already has an open membership");
+      if (error instanceof UniqueConstraintError)
+        throw new ConflictException("El paciente ya tiene una membresía abierta");
       throw error;
     }
     return (await this.read(id, actor, own))!;
@@ -112,7 +114,7 @@ export class SqlMembershipRepository extends MembershipRepository {
    */
   async read(id: string, actor: AccessActor, own: boolean) {
     const [row] = await this.db.query<MembershipView>(MEMBERSHIP_SELECT + " WHERE m.id=:id AND " + ACCESS, {
-      replacements: { id, own, all: actor.permissions.includes("clinics:all"), actorId: actor.id },
+      replacements: { id, own, ...clinicScopeParams(actor), actorId: actor.id },
       type: QueryTypes.SELECT
     });
     return row ? { ...row, ...membershipStatus(row) } : null;
@@ -130,8 +132,7 @@ export class SqlMembershipRepository extends MembershipRepository {
       ...query,
       patientId: query.patientId ?? null,
       own,
-      actorId: actor.id,
-      all: actor.permissions.includes("clinics:all")
+      ...clinicScopeParams(actor)
     };
     const items = await this.db.query<MembershipView>(
       MEMBERSHIP_SELECT + filter + ' ORDER BY m."createdAt" DESC,m.id DESC LIMIT :limit OFFSET :offset',
@@ -173,7 +174,7 @@ export class SqlMembershipRepository extends MembershipRepository {
    * @returns The persisted result or completion of the authorized operation.
    */
   async periods(id: string, page: Pagination, actor: AccessActor, own: boolean) {
-    if (!(await this.read(id, actor, own))) throw new NotFoundException("Membership not found");
+    if (!(await this.read(id, actor, own))) throw new NotFoundException("No se encontró la membresía");
     const items = await this.db.query<MembershipPeriod>(
       'SELECT * FROM membership_periods WHERE "membershipId"=:id ORDER BY number DESC LIMIT :limit OFFSET :offset',
       { replacements: { id, ...page }, type: QueryTypes.SELECT }
@@ -198,20 +199,20 @@ export class SqlMembershipRepository extends MembershipRepository {
         transaction,
         type: QueryTypes.SELECT
       });
-      if (!hint) throw new NotFoundException("Membership not found");
+      if (!hint) throw new NotFoundException("No se encontró la membresía");
       const [patient] = await this.db.query<PatientView>("SELECT * FROM patients WHERE id=:patientId FOR UPDATE", {
         replacements: { patientId: hint.patientId },
         transaction,
         type: QueryTypes.SELECT
       });
-      if (own && patient.userId !== actor.id) throw new NotFoundException("Membership not found");
+      if (own && patient.userId !== actor.id) throw new NotFoundException("No se encontró la membresía");
       if (!own) await requirePatientScope(this.db, transaction, hint.patientId, actor);
       const [before] = await this.db.query<MembershipRecord>("SELECT * FROM memberships WHERE id=:id FOR UPDATE", {
         replacements: { id },
         transaction,
         type: QueryTypes.SELECT
       });
-      if (suspend && before.closedAt) throw new ConflictException("Closed membership cannot be suspended");
+      if (suspend && before.closedAt) throw new ConflictException("No se puede suspender una membresía cerrada");
       if (suspend ? before.suspendedAt : before.cancelRequestedAt) return;
       const field = suspend ? '"suspendedAt"' : '"cancelRequestedAt"';
       const [after] = await this.db.query<MembershipRecord>(

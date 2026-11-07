@@ -1,17 +1,20 @@
+import { CrudEntityController } from "../../../shared/presentation/crud.controller";
 import { Controller, Get, Param, ParseUUIDPipe, Query, Req } from "@nestjs/common";
-import { AuditUseCase } from "../application/audit.usecase";
+import { CrudAuditUseCase } from "../application/crudAudit.usecase";
 import { AuditQueryDto } from "./audit.dto";
 import { AUDIT_PERMISSIONS } from "../domain/audit.permissions";
 import { Permissions } from "../../auth/presentation/auth.decorators";
 import type { AuthRequest } from "../../auth/presentation/auth.guard";
 /** Privileged, read-only audit API. */
 @Controller("audit")
-export class AuditController {
+export class AuditController extends CrudEntityController<CrudAuditUseCase> {
   /**
-   *
-   * @param audit Value required by this operation.
+   * Recibe las dependencias de la operación.
+   * @param audit Dependencia tipada de audit.
    */
-  constructor(private readonly audit: AuditUseCase) {}
+  constructor(audit: CrudAuditUseCase) {
+    super(audit);
+  }
   /**
    *
    * @param query Validated audit filters and bounded pagination.
@@ -22,7 +25,7 @@ export class AuditController {
     @Query() query: AuditQueryDto,
     @Req() request: AuthRequest
   ) {
-    return this.audit.list(query, request.user);
+    return this.crud("list", query, request.user);
   }
   /**
    *
@@ -34,6 +37,6 @@ export class AuditController {
     @Param("id", ParseUUIDPipe) id: string,
     @Req() request: AuthRequest
   ) {
-    return this.audit.read(id, request.user);
+    return this.crud("read", id, request.user);
   }
 }

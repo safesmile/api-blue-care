@@ -7,8 +7,8 @@ import { JobQueue, type HttpJob } from "../../shared/domain/job-queue";
 export class GoogleJobQueue extends JobQueue {
   private readonly client = new CloudTasksClient();
   /**
-   *
-   * @param config Validated application settings.
+   * Recibe las dependencias de la operación.
+   * @param config Dependencia tipada de config.
    */
   constructor(private readonly config: ConfigService) {
     super();

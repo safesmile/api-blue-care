@@ -1,9 +1,9 @@
-import { PushUseCase } from "../../../modules/notifications/application/push.usecase";
+import { ApiValidationPipe } from "../../../shared/presentation/api-validation.pipe";
+import { PushUseCase } from "../../helpers/usecases/PushUseCase";
 import request from "supertest";
-import { ValidationPipe } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import { NotificationJobsController } from "../../../modules/notifications/presentation/notification-jobs.controller";
-import { NotificationsUseCase } from "../../../modules/notifications/application/notifications.usecase";
+import { NotificationsUseCase } from "../../helpers/usecases/NotificationsUseCase";
 import { GoogleJobGuard } from "../../../infrastructure/jobs/google-job.guard";
 describe("NotificationJobsController", () => {
   const notifications = { deliver: jest.fn(), drain: jest.fn().mockResolvedValue({ sent: 1 }) };
@@ -12,15 +12,15 @@ describe("NotificationJobsController", () => {
     const module = await Test.createTestingModule({
       controllers: [NotificationJobsController],
       providers: [
-        { provide: NotificationsUseCase, useValue: notifications },
-        { provide: PushUseCase, useValue: { drain: jest.fn().mockResolvedValue({ sent: 2 }) } }
+        ...NotificationsUseCase.providers(notifications),
+        ...PushUseCase.providers({ drain: jest.fn().mockResolvedValue({ sent: 2 }) })
       ]
     })
       .overrideGuard(GoogleJobGuard)
       .useValue({ canActivate: () => true })
       .compile();
     app = module.createNestApplication();
-    app.useGlobalPipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true }));
+    app.useGlobalPipes(new ApiValidationPipe({ whitelist: true, forbidNonWhitelisted: true }));
     await app.init();
   });
   afterAll(async () => {

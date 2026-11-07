@@ -1,15 +1,23 @@
 import { NotFoundException, type INestApplication } from "@nestjs/common";
 import request from "supertest";
 import { UsersController } from "../../../modules/identity/presentation/users.controller";
-import { UsersUseCase } from "../../../modules/identity/application/users.usecase";
+import { UsersUseCase } from "../../helpers/usecases/UsersUseCase";
 import { controllerApp } from "../../helpers/controller-app";
 import { userFixture } from "../../helpers/identity.fixture";
 describe("UsersController", () => {
   let app: INestApplication;
-  const users = { create: jest.fn(), read: jest.fn(), list: jest.fn(), update: jest.fn(), delete: jest.fn() };
+  const users = {
+    collaborators: jest.fn(),
+    collaborator: jest.fn(),
+    create: jest.fn(),
+    read: jest.fn(),
+    list: jest.fn(),
+    update: jest.fn(),
+    delete: jest.fn()
+  };
   const user = userFixture().toView();
   beforeAll(async () => {
-    app = await controllerApp(UsersController, [{ provide: UsersUseCase, useValue: users }], user);
+    app = await controllerApp(UsersController, [...UsersUseCase.providers(users)], user);
   });
   beforeEach(() => jest.resetAllMocks());
   afterAll(async () => {
@@ -64,7 +72,7 @@ describe("UsersController", () => {
     expect(users.read).not.toHaveBeenCalled();
   });
   it("preserves not-found errors", async () => {
-    users.read.mockRejectedValue(new NotFoundException());
+    users.read.mockRejectedValue(new NotFoundException("No se encontró el recurso solicitado"));
     await request(app.getHttpServer())
       .get("/users/" + user.id)
       .expect(404);
@@ -134,5 +142,15 @@ describe("UsersController", () => {
         .patch("/users/" + user.id)
         .send(input)
         .expect(400);
+  });
+  it("routes collaborator list and detail separately from global identity reads", async () => {
+    users.collaborators.mockResolvedValue({ items: [], total: 0 });
+    await request(app.getHttpServer()).get("/users/collaborators").expect(200, { items: [], total: 0 });
+    expect(users.collaborators).toHaveBeenCalledWith({ limit: 25, offset: 0 }, user);
+    users.collaborator.mockResolvedValue(user);
+    await request(app.getHttpServer())
+      .get("/users/collaborators/" + user.id)
+      .expect(200, user);
+    expect(users.collaborator).toHaveBeenCalledWith(user.id, user);
   });
 });

@@ -1,3 +1,6 @@
+import { PermissionCode } from "../../../shared/domain/permission-code";
+import { PATIENT_SCOPE_SQL, requirePatientScope } from "./patient-scope";
+import { clinicScopeParams } from "../../clinics/infrastructure/clinic-scope";
 import {
   ConflictException,
   ForbiddenException,
@@ -19,15 +22,14 @@ import { ClinicAccess } from "../../clinics/infrastructure/clinic-access";
 import { recordChange } from "../../audit/infrastructure/record-change";
 import { patientChange } from "../domain/patient.events";
 import { linkPatientAccount } from "./patient-account-link";
-const SCOPE = `(:all OR EXISTS(SELECT 1 FROM patient_clinics pc JOIN clinics c ON c.id=pc."clinicId" AND c.enabled
- JOIN clinic_staff s ON s."clinicId"=pc."clinicId" WHERE pc."patientId"=p.id AND s."userId"=:actorId))`;
+const SCOPE = PATIENT_SCOPE_SQL;
 /** Persists shared patient records with scoped access and explicit one-to-one account binding. */
 @Injectable()
 export class SqlPatientRepository extends PatientRepository {
   /**
-   *
-   * @param db PostgreSQL connection.
-   * @param access Current clinic assignment resolver.
+   * Recibe las dependencias de la operación.
+   * @param db Dependencia tipada de db.
+   * @param access Dependencia tipada de access.
    */
   constructor(
     private readonly db: Sequelize,
@@ -84,7 +86,7 @@ export class SqlPatientRepository extends PatientRepository {
    */
   async read(id: string, actor: AccessActor) {
     const [row] = await this.db.query<PatientView>("SELECT p.* FROM patients p WHERE p.id=:id AND " + SCOPE, {
-      replacements: { id, all: actor.permissions.includes("clinics:all"), actorId: actor.id },
+      replacements: { id, ...clinicScopeParams(actor), actorId: actor.id },
       type: QueryTypes.SELECT
     });
     return row ?? null;
@@ -117,7 +119,7 @@ export class SqlPatientRepository extends PatientRepository {
       AND (:search IS NULL OR (p."firstName" || ' ' || p."lastName") ILIKE :search ESCAPE '!' OR p.email ILIKE :search ESCAPE '!' OR p.phone ILIKE :search ESCAPE '!')`;
     const replacements = {
       ...query,
-      all: actor.permissions.includes("clinics:all"),
+      ...clinicScopeParams(actor),
       actorId: actor.id,
       enabled: query.enabled ?? null,
       clinicId: query.clinicId ?? null,
@@ -157,15 +159,15 @@ export class SqlPatientRepository extends PatientRepository {
    * @returns The persisted result or completion of the authorized operation.
    */
   async updateOwn(userId: string, input: Pick<PatientInput, "phone" | "birthDate" | "address">, actor: AccessActor) {
-    if (userId !== actor.id || !actor.permissions.includes("patients:self"))
-      throw new ForbiddenException("Own patient only");
+    if (userId !== actor.id || !actor.permissions.includes(PermissionCode.PatientsSelf))
+      throw new ForbiddenException("Solo puede acceder a su propio perfil de paciente");
     return this.db.transaction(async transaction => {
       const [before] = await this.db.query<PatientView>('SELECT * FROM patients WHERE "userId"=:userId FOR UPDATE', {
         replacements: { userId },
         transaction,
         type: QueryTypes.SELECT
       });
-      if (!before) throw new NotFoundException("No linked patient");
+      if (!before) throw new NotFoundException("No hay un paciente vinculado");
       return this.save(
         before,
         { phone: input.phone, birthDate: input.birthDate, address: input.address },
@@ -198,9 +200,11 @@ export class SqlPatientRepository extends PatientRepository {
    * @returns The persisted result or completion of the authorized operation.
    */
   async associate(id: string, clinicId: string, actor: AccessActor) {
-    if (!actor.permissions.includes("clinics:all")) throw new ForbiddenException("Global clinic scope required");
+    if (!(actor.globalPermissions ?? actor.permissions).includes(PermissionCode.ClinicsAll))
+      throw new ForbiddenException("Se requiere autorización global para gestionar clínicas");
     await this.db.transaction(async transaction => {
       await this.lock(id, transaction);
+      await this.requireScope(id, actor, transaction);
       await this.access.require(clinicId, actor, transaction, true);
       const [existing] = await this.db.query<{ clinicId: string }>(
         'SELECT "clinicId" FROM patient_clinics WHERE "patientId"=:id AND "clinicId"=:clinicId',
@@ -225,13 +229,13 @@ export class SqlPatientRepository extends PatientRepository {
    * @returns The persisted result or completion of the authorized operation.
    */
   async clinics(id: string, actor: AccessActor) {
-    if (!(await this.read(id, actor))) throw new NotFoundException("Patient not found");
+    if (!(await this.read(id, actor))) throw new NotFoundException("No se encontró el paciente");
     const rows = await this.db.query<{ clinicId: string }>(
       `SELECT pc."clinicId" FROM patient_clinics pc WHERE pc."patientId"=:id
-       AND (:all OR EXISTS(SELECT 1 FROM clinic_staff s WHERE s."clinicId"=pc."clinicId" AND s."userId"=:actorId))
+       AND blue_care_clinic_allowed(:actorId,pc."clinicId",CAST(:currentClinicId AS UUID),CAST(:clinicPermission AS TEXT))
        ORDER BY pc."clinicId"`,
       {
-        replacements: { id, all: actor.permissions.includes("clinics:all"), actorId: actor.id },
+        replacements: { id, ...clinicScopeParams(actor), actorId: actor.id },
         type: QueryTypes.SELECT
       }
     );
@@ -244,9 +248,11 @@ export class SqlPatientRepository extends PatientRepository {
    * @param actor Authenticated identity and current permissions.
    */
   async dissociate(id: string, clinicId: string, actor: AccessActor) {
-    if (!actor.permissions.includes("clinics:all")) throw new ForbiddenException("Global clinic scope required");
+    if (!(actor.globalPermissions ?? actor.permissions).includes(PermissionCode.ClinicsAll))
+      throw new ForbiddenException("Se requiere autorización global para gestionar clínicas");
     await this.db.transaction(async transaction => {
       await this.lock(id, transaction);
+      await this.requireScope(id, actor, transaction);
       await this.access.require(clinicId, actor, transaction);
       const rows = await this.db.query<{ clinicId: string }>(
         'DELETE FROM patient_clinics WHERE "patientId"=:id AND "clinicId"=:clinicId RETURNING "clinicId"',
@@ -272,7 +278,7 @@ export class SqlPatientRepository extends PatientRepository {
       transaction,
       type: QueryTypes.SELECT
     });
-    if (!row) throw new NotFoundException("Patient not found");
+    if (!row) throw new NotFoundException("No se encontró el paciente");
     return row;
   }
   /**
@@ -283,14 +289,9 @@ export class SqlPatientRepository extends PatientRepository {
    * @returns The persisted result or completion of the authorized operation.
    */
   private async requireScope(id: string, actor: AccessActor, transaction: Transaction) {
-    if (actor.permissions.includes("clinics:all")) return;
-    const rows = await this.db.query<{ clinicId: string }>(
-      `SELECT pc."clinicId" FROM patient_clinics pc JOIN clinics c ON c.id=pc."clinicId" AND c.enabled
-      JOIN clinic_staff s ON s."clinicId"=pc."clinicId" WHERE pc."patientId"=:id AND s."userId"=:actorId FOR SHARE OF c,s`,
-      { replacements: { id, actorId: actor.id }, transaction, type: QueryTypes.SELECT }
-    );
-    if (!rows.length) throw new NotFoundException("Patient not found in assigned clinics");
+    await requirePatientScope(this.db, transaction, id, actor);
   }
+
   /**
    * Saves allowlisted fields and their audit and notifications atomically.
    * @param before Persisted state before the operation.
@@ -306,12 +307,14 @@ export class SqlPatientRepository extends PatientRepository {
     transaction: Transaction
   ) {
     if (before.userId && input.email !== undefined && input.email !== before.email)
-      throw new ConflictException("Linked patient contact changes require verified account contact workflow");
+      throw new ConflictException(
+        "Para modificar el contacto del paciente vinculado debe utilizar el flujo de verificación de la cuenta"
+      );
     const next = { ...before };
     for (const field of ["firstName", "lastName", "email", "phone", "dpi", "birthDate", "address", "enabled"] as const)
       if (input[field] !== undefined) Object.assign(next, { [field]: input[field] });
     if (!next.firstName.trim() || !next.lastName.trim() || next.firstName.length + next.lastName.length > 119)
-      throw new BadRequestException("Invalid combined patient names");
+      throw new BadRequestException("La longitud total del nombre del paciente no es válida");
     const [after] = await this.db.query<PatientView>(
       `UPDATE patients SET "firstName"=:firstName,"lastName"=:lastName,email=:email,phone=:phone,dpi=:dpi,
        "birthDate"=:birthDate,address=:address,enabled=:enabled,"updatedAt"=NOW() WHERE id=:id RETURNING *`,
@@ -334,7 +337,7 @@ export class SqlPatientRepository extends PatientRepository {
       return await operation();
     } catch (error) {
       if (error instanceof UniqueConstraintError)
-        throw new ConflictException("DPI or account already registered to a patient");
+        throw new ConflictException("El DPI o la cuenta ya están registrados en un paciente");
       throw error;
     }
   }

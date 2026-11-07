@@ -1,4 +1,7 @@
-import { PushUseCase } from "./application/push.usecase";
+import { RegisterPushUseCase } from "./application/registerPush.usecase";
+import { CrudPushUseCase } from "./application/crudPush.usecase";
+import { RemovePushUseCase } from "./application/removePush.usecase";
+import { DrainPushUseCase } from "./application/drainPush.usecase";
 import { PushRepository, PushSender } from "./domain/push.repository";
 import { SqlPushRepository } from "./infrastructure/sql-push.repository";
 import { FcmPushSender } from "./infrastructure/fcm-push-sender";
@@ -8,7 +11,12 @@ import { EmailModule } from "../../infrastructure/email/email.module";
 import { JobsModule } from "../../infrastructure/jobs/jobs.module";
 import { NotificationRepository } from "./domain/notification.repository";
 import { SqlNotificationRepository } from "./infrastructure/sql-notification.repository";
-import { NotificationsUseCase } from "./application/notifications.usecase";
+import { NotifyNotificationUseCase } from "./application/notifyNotification.usecase";
+import { CrudNotificationsUseCase } from "./application/crudNotifications.usecase";
+import { MarkReadNotificationUseCase } from "./application/markReadNotification.usecase";
+import { CancelNotificationUseCase } from "./application/cancelNotification.usecase";
+import { DeliverNotificationUseCase } from "./application/deliverNotification.usecase";
+import { DrainNotificationUseCase } from "./application/drainNotification.usecase";
 import { NotificationsController } from "./presentation/notifications.controller";
 import { NotificationJobsController } from "./presentation/notification-jobs.controller";
 /** Persistent notification infrastructure usable by future business modules. */
@@ -16,12 +24,31 @@ import { NotificationJobsController } from "./presentation/notification-jobs.con
   imports: [EmailModule, JobsModule],
   controllers: [NotificationsController, NotificationJobsController, PushController],
   providers: [
-    PushUseCase,
+    RegisterPushUseCase,
+    CrudPushUseCase,
+    RemovePushUseCase,
+    DrainPushUseCase,
     { provide: PushRepository, useClass: SqlPushRepository },
     { provide: PushSender, useClass: FcmPushSender },
-    NotificationsUseCase,
+    NotifyNotificationUseCase,
+    CrudNotificationsUseCase,
+    MarkReadNotificationUseCase,
+    CancelNotificationUseCase,
+    DeliverNotificationUseCase,
+    DrainNotificationUseCase,
     { provide: NotificationRepository, useClass: SqlNotificationRepository }
   ],
-  exports: [NotificationsUseCase, PushUseCase]
+  exports: [
+    NotifyNotificationUseCase,
+    CrudNotificationsUseCase,
+    MarkReadNotificationUseCase,
+    CancelNotificationUseCase,
+    DeliverNotificationUseCase,
+    DrainNotificationUseCase,
+    RegisterPushUseCase,
+    CrudPushUseCase,
+    RemovePushUseCase,
+    DrainPushUseCase
+  ]
 })
 export class NotificationsModule {}

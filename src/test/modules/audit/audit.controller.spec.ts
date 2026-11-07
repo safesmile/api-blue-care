@@ -1,6 +1,6 @@
 import request from "supertest";
 import { AuditController } from "../../../modules/audit/presentation/audit.controller";
-import { AuditUseCase } from "../../../modules/audit/application/audit.usecase";
+import { AuditUseCase } from "../../helpers/usecases/AuditUseCase";
 import { controllerApp } from "../../helpers/controller-app";
 import { userFixture } from "../../helpers/identity.fixture";
 describe("AuditController", () => {
@@ -11,7 +11,7 @@ describe("AuditController", () => {
     actor = userFixture().toView();
   let app;
   beforeAll(async () => {
-    app = await controllerApp(AuditController, [{ provide: AuditUseCase, useValue: audit }], actor);
+    app = await controllerApp(AuditController, [...AuditUseCase.providers(audit)], actor);
   });
   afterAll(async () => {
     await app.close();

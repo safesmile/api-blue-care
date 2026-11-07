@@ -1,6 +1,6 @@
 import request from "supertest";
 import { PlansController } from "../../../modules/plans/presentation/plans.controller";
-import { PlansUseCase } from "../../../modules/plans/application/plans.usecase";
+import { PlansUseCase } from "../../helpers/usecases/PlansUseCase";
 import { controllerApp } from "../../helpers/controller-app";
 import { userFixture } from "../../helpers/identity.fixture";
 describe("PlansController", () => {
@@ -25,7 +25,7 @@ describe("PlansController", () => {
   };
   let app;
   beforeAll(async () => {
-    app = await controllerApp(PlansController, [{ provide: PlansUseCase, useValue: service }], actor);
+    app = await controllerApp(PlansController, [...PlansUseCase.providers(service)], actor);
   });
   afterAll(async () => {
     await app.close();

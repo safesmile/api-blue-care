@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, Logger, UnauthorizedException } from "@nestjs/common";
 import { createHash } from "node:crypto";
-import { AccountActionsUseCase } from "../../../modules/auth/application/account-actions.usecase";
+import { AccountActionsUseCase } from "../../helpers/usecases/AccountActionsUseCase";
 import type { AccountActionsRepository, AccountMailer } from "../../../modules/auth/domain/account-actions.repository";
 import { identityFixture, userFixture } from "../../helpers/identity.fixture";
 describe("AccountActionsUseCase", () => {

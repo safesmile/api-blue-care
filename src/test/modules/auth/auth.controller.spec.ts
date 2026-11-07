@@ -2,7 +2,7 @@ import type { INestApplication } from "@nestjs/common";
 import { UnauthorizedException } from "@nestjs/common";
 import request from "supertest";
 import { AuthController } from "../../../modules/auth/presentation/auth.controller";
-import { AuthUseCase } from "../../../modules/auth/application/auth.usecase";
+import { AuthUseCase } from "../../helpers/usecases/AuthUseCase";
 import { controllerApp } from "../../helpers/controller-app";
 import { userFixture } from "../../helpers/identity.fixture";
 import type { AuthRequest } from "../../../modules/auth/presentation/auth.guard";
@@ -11,7 +11,11 @@ describe("AuthController", () => {
   const auth = { login: jest.fn(), refresh: jest.fn(), logout: jest.fn() };
   const refreshToken = "a".repeat(80);
   beforeAll(async () => {
-    app = await controllerApp(AuthController, [{ provide: AuthUseCase, useValue: auth }]);
+    app = await controllerApp(
+      AuthController,
+      [...AuthUseCase.providers(auth)],
+      Object.assign(userFixture().toView(), { mode: "staff" })
+    );
   });
   beforeEach(() => jest.resetAllMocks());
   afterAll(async () => {
@@ -23,7 +27,7 @@ describe("AuthController", () => {
       .post("/auth/login")
       .send({ email: "admin@blue.test", password: "password" })
       .expect(200, { token: "jwt", refreshToken });
-    expect(auth.login).toHaveBeenCalledWith("admin@blue.test", "password");
+    expect(auth.login).toHaveBeenCalledWith("admin@blue.test", "password", null);
   });
   it("validates login and rejects unexpected fields", async () => {
     await request(app.getHttpServer())
@@ -33,7 +37,7 @@ describe("AuthController", () => {
     expect(auth.login).not.toHaveBeenCalled();
   });
   it("preserves authentication errors", async () => {
-    auth.login.mockRejectedValue(new UnauthorizedException());
+    auth.login.mockRejectedValue(new UnauthorizedException("Debe iniciar sesión con una cuenta válida"));
     await request(app.getHttpServer())
       .post("/auth/login")
       .send({ email: "admin@blue.test", password: "wrong" })
@@ -60,7 +64,24 @@ describe("AuthController", () => {
   });
   it("returns the authenticated profile supplied by the guard", () => {
     const user = userFixture().toView();
-    const controller = new AuthController(auth as unknown as AuthUseCase);
+    const controller = new AuthController(...AuthUseCase.controllerArguments(auth));
     expect(controller.me({ user } as AuthRequest)).toEqual(user);
+  });
+  it("rotates the current authenticated session when switching clinic selection", async () => {
+    await request(app.getHttpServer()).post("/auth/switch-clinic").send({ refreshToken, clinicId: null }).expect(200);
+    expect(auth.refresh).toHaveBeenCalledWith(refreshToken, null, userFixture().id, undefined);
+    await request(app.getHttpServer()).post("/auth/switch-clinic").send({ refreshToken, clinicId: "bad" }).expect(400);
+    await request(app.getHttpServer()).post("/auth/switch-clinic").send({ refreshToken }).expect(400);
+  });
+  it("rejects a requested user type and no longer exposes a portal switch", async () => {
+    await request(app.getHttpServer())
+      .post("/auth/login")
+      .send({ email: "admin@blue.test", password: "password", mode: "patient" })
+      .expect(400);
+    await request(app.getHttpServer()).post("/auth/switch-mode").send({ refreshToken, mode: "patient" }).expect(404);
+    const controller = new AuthController(...AuthUseCase.controllerArguments(auth));
+    expect(() =>
+      controller.switchClinic({ refreshToken, clinicId: null }, { user: { mode: "patient" } } as AuthRequest)
+    ).toThrow("Solo el personal puede seleccionar una clínica");
   });
 });

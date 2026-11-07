@@ -1,6 +1,9 @@
+import type { SessionMode } from "../../authorization/domain/clinic-context.repository";
 export interface Session {
   id: string;
   userId: string;
+  clinicId?: string | null;
+  mode: SessionMode;
   tokenHash: string;
   expiresAt: Date;
   absoluteExpiresAt: Date;
@@ -27,7 +30,7 @@ export abstract class SessionRepository {
    * @param id Resource identifier.
    * @param userId Identifier of the session owner.
    */
-  abstract isActive(id: string, userId: string): Promise<boolean>;
+  abstract isActive(id: string, userId: string, clinicId?: string | null, mode?: SessionMode): Promise<boolean>;
   /**
    * Marks the matching session as revoked.
    * @param hash Stored token or password digest.

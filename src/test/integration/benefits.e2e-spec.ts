@@ -1,13 +1,14 @@
+import { ApiValidationPipe } from "../../shared/presentation/api-validation.pipe";
+import { assignClinicOperator } from "../helpers/clinic-operator.fixture";
 import { Test } from "@nestjs/testing";
-import { ValidationPipe } from "@nestjs/common";
 import { Sequelize } from "sequelize-typescript";
 import { QueryTypes } from "sequelize";
 import { randomUUID, createHash } from "node:crypto";
 import request from "supertest";
 import { AppModule } from "../../app.module";
 import { createSuperUser } from "../../../scripts/lib/super-user";
-import { AuthUseCase } from "../../modules/auth/application/auth.usecase";
-import { AccountActionsUseCase } from "../../modules/auth/application/account-actions.usecase";
+import { AuthUseCase } from "../helpers/usecases/AuthUseCase";
+import { AccountActionsUseCase } from "../helpers/usecases/AccountActionsUseCase";
 import { AccountMailer } from "../../modules/auth/domain/account-actions.repository";
 import { EmailSender } from "../../shared/domain/email-sender";
 import {
@@ -15,7 +16,7 @@ import {
   MembershipBilling,
   type VerifiedPayment
 } from "../../modules/memberships/domain/membership-billing";
-import { MembershipsUseCase } from "../../modules/memberships/application/memberships.usecase";
+import { MembershipsUseCase } from "../helpers/usecases/MembershipsUseCase";
 import { BenefitContext } from "../../modules/benefits/infrastructure/benefit-context";
 import { periodEnd } from "../../modules/memberships/domain/membership-state";
 
@@ -64,11 +65,13 @@ describe("Atomic global benefits and individual family quota (disposable Postgre
     const user = (
       await api().post("/users").send({ email, firstName: "Benefit", lastName: "User", password, roles }).expect(201)
     ).body;
-    await app.get(AccountActionsUseCase).requestActivation(email);
-    await app
-      .get(AccountActionsUseCase)
-      .redeem("activate", mail.findLast(entry => entry.email === email && entry.kind === "activate")!.token, password);
-    const session = await app.get(AuthUseCase).login(email, password);
+    await AccountActionsUseCase.resolve(app).requestActivation(email);
+    await AccountActionsUseCase.resolve(app).redeem(
+      "activate",
+      mail.findLast(entry => entry.email === email && entry.kind === "activate")!.token,
+      password
+    );
+    const session = await AuthUseCase.resolve(app).login(email, password);
     return { user, token: session.token };
   };
   const paidOwner = async (email: string, clinicId: string, periods: number) => {
@@ -101,7 +104,7 @@ describe("Atomic global benefits and individual family quota (disposable Postgre
         membershipId: member.id
       });
       await app.get(MembershipBilling).receive({ id: "msg_" + id, resourceId: id, eventType: "intent.succeeded" });
-      await app.get(MembershipsUseCase).drain();
+      await MembershipsUseCase.resolve(app).drain();
     }
     const membership = (
       await api(value.token)
@@ -162,7 +165,7 @@ describe("Atomic global benefits and individual family quota (disposable Postgre
       .useValue(gateway)
       .compile();
     app = module.createNestApplication();
-    app.useGlobalPipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }));
+    app.useGlobalPipes(new ApiValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }));
     await app.listen(0, "127.0.0.1");
     db = app.get(Sequelize);
     await createSuperUser(db, {
@@ -171,9 +174,11 @@ describe("Atomic global benefits and individual family quota (disposable Postgre
       email: "benefit-root@blue.test",
       password
     });
-    rootToken = (await app.get(AuthUseCase).login("benefit-root@blue.test", password)).token;
+    rootToken = (await AuthUseCase.resolve(app).login("benefit-root@blue.test", password)).token;
     clinicA = (await api().post("/clinics").send({ code: "benefit-north", name: "Benefit north" }).expect(201)).body;
+    await assignClinicOperator(app, rootToken, clinicA.id);
     clinicB = (await api().post("/clinics").send({ code: "benefit-south", name: "Benefit south" }).expect(201)).body;
+    await assignClinicOperator(app, rootToken, clinicB.id);
     plan = (await api().post("/plans").send({ code: "benefit-blue-care-plus" }).expect(201)).body;
     version = (
       await api()
@@ -210,9 +215,11 @@ describe("Atomic global benefits and individual family quota (disposable Postgre
     staffB = await account("benefit-staff-b@blue.test", ["benefit-clinic-operator"]);
     await api()
       .put("/clinics/" + clinicA.id + "/staff/" + staffA.user.id)
+      .send({ roles: ["customer"] })
       .expect(204);
     await api()
       .put("/clinics/" + clinicB.id + "/staff/" + staffB.user.id)
+      .send({ roles: ["customer"] })
       .expect(204);
     businessNow = new Date();
     clock = jest.spyOn(app.get(BenefitContext), "now").mockImplementation(async () => businessNow);

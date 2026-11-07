@@ -18,6 +18,54 @@ export = {
         },
         { transaction }
       );
+      await q.addConstraint("user_roles", {
+        fields: ["clinicId"],
+        type: "foreign key",
+        name: "user_roles_clinic_fk",
+        references: { table: "clinics", field: "id" },
+        onDelete: "CASCADE",
+        onUpdate: "CASCADE",
+        transaction
+      });
+      await q.addConstraint("sessions", {
+        fields: ["clinicId"],
+        type: "foreign key",
+        name: "sessions_clinic_fk",
+        references: { table: "clinics", field: "id" },
+        onDelete: "RESTRICT",
+        onUpdate: "CASCADE",
+        transaction
+      });
+      await q.addColumn(
+        "invitations",
+        "clinicAssignments",
+        { type: S.JSONB, allowNull: false, defaultValue: [] },
+        { transaction }
+      );
+      await q.addColumn(
+        "invitations",
+        "kind",
+        { type: S.STRING(20), allowNull: false, defaultValue: "general" },
+        { transaction }
+      );
+      await q.sequelize.query(
+        "ALTER TABLE invitations ADD CONSTRAINT invitations_kind_check CHECK (kind IN ('general','patient','collaborator'))",
+        { transaction }
+      );
+      await q.addColumn(
+        "invitations",
+        "staff",
+        { type: S.BOOLEAN, allowNull: false, defaultValue: false },
+        { transaction }
+      );
+      await q.createTable(
+        "staff_profiles",
+        {
+          userId: { type: S.UUID, primaryKey: true, references: { model: "users", key: "id" }, onDelete: "CASCADE" },
+          createdAt: { type: S.DATE, allowNull: false }
+        },
+        { transaction }
+      );
       await q.createTable(
         "clinic_staff",
         {
@@ -91,6 +139,14 @@ export = {
         { transaction }
       );
       await q.addIndex("invitations", ["patientId"], { transaction });
+      await q.sequelize.query(
+        `CREATE FUNCTION blue_care_clinic_allowed(actor UUID, clinic UUID, selected UUID, operation TEXT)
+        RETURNS BOOLEAN LANGUAGE SQL STABLE AS $$ SELECT
+        (selected IS NULL OR selected=clinic) AND EXISTS(SELECT 1 FROM clinic_staff s WHERE s."userId"=actor AND s."clinicId"=clinic)
+        AND (operation IS NULL OR EXISTS(SELECT 1 FROM user_roles ur JOIN role_permissions rp ON rp."roleId"=ur."roleId"
+        WHERE ur."userId"=actor AND (ur."clinicId" IS NULL OR ur."clinicId"=clinic) AND rp."permissionCode"=operation)) $$`,
+        { transaction }
+      );
     });
   },
   async down(q: QueryInterface) {
@@ -99,6 +155,13 @@ export = {
       await q.dropTable("patient_clinics", { transaction });
       await q.dropTable("patients", { transaction });
       await q.dropTable("clinic_staff", { transaction });
+      await q.sequelize.query("DROP TABLE IF EXISTS staff_profiles", { transaction });
+      await q.sequelize.query('ALTER TABLE invitations DROP COLUMN IF EXISTS "staff"', { transaction });
+      await q.sequelize.query('ALTER TABLE invitations DROP COLUMN IF EXISTS "kind"', { transaction });
+      await q.sequelize.query("ALTER TABLE user_roles DROP CONSTRAINT IF EXISTS user_roles_clinic_fk", { transaction });
+      await q.sequelize.query("ALTER TABLE sessions DROP CONSTRAINT IF EXISTS sessions_clinic_fk", { transaction });
+      await q.sequelize.query('ALTER TABLE invitations DROP COLUMN IF EXISTS "clinicAssignments"', { transaction });
+      await q.sequelize.query("DROP FUNCTION IF EXISTS blue_care_clinic_allowed(UUID,UUID,UUID,TEXT)", { transaction });
       await q.dropTable("clinics", { transaction });
     });
   }

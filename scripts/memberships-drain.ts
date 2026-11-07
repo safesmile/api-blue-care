@@ -1,6 +1,6 @@
 import { loadSecrets } from "../src/infrastructure/config/load-secrets";
 import { NestFactory } from "@nestjs/core";
-import { MembershipsUseCase } from "../src/modules/memberships/application/memberships.usecase";
+import { DrainMembershipUseCase } from "../src/modules/memberships/application/drainMembership.usecase";
 /** Runs one bounded provider inbox/billing outbox batch without starting an HTTP server. */
 async function main() {
   await loadSecrets();
@@ -8,7 +8,7 @@ async function main() {
   const { AppModule } = require("../src/app.module") as typeof import("../src/app.module");
   const app = await NestFactory.createApplicationContext(AppModule, { logger: ["warn", "error"] });
   try {
-    console.info(await app.get(MembershipsUseCase).drain());
+    console.info(await app.get(DrainMembershipUseCase).execute());
   } finally {
     await app.close();
   }

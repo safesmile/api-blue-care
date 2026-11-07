@@ -78,3 +78,7 @@ Migración TypeScript `202611040003-benefits`: definiciones, revisiones, configu
 Las pruebas cubren competencia real con PostgreSQL entre doce solicitudes de dos clínicas, publicación concurrente, cupos individuales, cambios publicados contando uso previo, períodos mensuales/anuales/contrato, anulaciones simultáneas y entre períodos, bloqueo anual, snapshots tras reemplazo/eliminación del operador, permisos y comprobantes expirados/reutilizados. Un fallo simulado de persistencia del aviso verifica rollback del canje completo. Solo las pruebas sustituyen el reloj del contexto para avanzar aniversarios; producción siempre usa reloj PostgreSQL.
 
 Verificación final del paso 6: 245 pruebas unitarias (47 suites) y 82 de integración (8 suites) aprobadas; cobertura de casos de uso/controladores 100% líneas, sentencias y funciones, 82.4% ramas. Build, tipos, lint sin advertencias y formato aprobados. PostgreSQL temporal detenido al terminar; sin migraciones sobre la base del usuario ni servicios externos reales.
+
+## Alcance actualizado por DN-17
+
+La selección firmada y los roles por sede se describen en clinic-context.md. Ni clinics:all ni Todas amplían consumos a sedes sin asignación/permisos. El historial del personal filtra la clínica de cada consumo; el paciente conserva su historial propio. La disponibilidad y el uso agregado siguen siendo globales por contrato/persona/período para impedir cupos duplicados; seleccionar una clínica no altera ese saldo global.

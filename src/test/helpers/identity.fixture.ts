@@ -28,6 +28,7 @@ export function userFixture(enabled = true) {
  */
 export function identityFixture() {
   const users: jest.Mocked<IdentityRepository> = {
+    collaborators: jest.fn(),
     create: jest.fn(async user => user),
     read: jest.fn(),
     list: jest.fn(),

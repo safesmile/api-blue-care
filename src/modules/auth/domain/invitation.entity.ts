@@ -1,9 +1,15 @@
+import type { ClinicRoleAssignment } from "../../authorization/domain/clinic-context.repository";
+import type { AccessActor } from "../../authorization/domain/access-policy";
 import { Entity } from "../../../shared/domain/entity";
 import type { UserView } from "../../identity/domain/user";
 export type InvitationStatus = "pending" | "accepted" | "revoked" | "expired";
-export type InvitationActor = Pick<UserView, "id" | "name" | "email" | "roles" | "permissions">;
+export type InvitationActor = Pick<UserView, "name" | "email"> & AccessActor;
+export type InvitationKind = "general" | "patient" | "collaborator";
 export interface InvitationProps {
+  kind?: InvitationKind;
+  staff?: boolean;
   patientId?: string | null;
+  clinicAssignments?: ClinicRoleAssignment[];
   email: string;
   firstName: string;
   lastName: string;
@@ -57,7 +63,10 @@ export class Invitation extends Entity<InvitationProps> {
     } = this.props;
     return {
       id: this.id,
+      kind: this.props.kind ?? "general",
+      staff: this.props.staff ?? !!this.props.clinicAssignments?.length,
       patientId: this.props.patientId ?? null,
+      clinicAssignments: this.props.clinicAssignments ?? [],
       email,
       firstName,
       lastName,

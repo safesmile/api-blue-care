@@ -1,6 +1,10 @@
+import { CrudEntityController } from "../../../shared/presentation/crud.controller";
+import { PermissionCode } from "../../../shared/domain/permission-code";
 import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Post, Query, Req } from "@nestjs/common";
 import { IsIn, IsString, Length, Matches } from "class-validator";
-import { PushUseCase } from "../application/push.usecase";
+import { RegisterPushUseCase } from "../application/registerPush.usecase";
+import { CrudPushUseCase } from "../application/crudPush.usecase";
+import { RemovePushUseCase } from "../application/removePush.usecase";
 import { Permissions } from "../../auth/presentation/auth.decorators";
 import type { AuthRequest } from "../../auth/presentation/auth.guard";
 import { PaginationDto } from "../../identity/presentation/user.dto";
@@ -13,20 +17,31 @@ export class PushDeviceDto {
 }
 /** Authenticated device ownership is always taken from the session. */
 @Controller("notifications/devices")
-export class PushController {
+export class PushController extends CrudEntityController<CrudPushUseCase> {
   /**
-   * Receives the explicit persistence and transport dependencies.
-   * @param push Explicit push value for this operation.
+   * Recibe las dependencias de la operación.
+   * @param registerPush Dependencia tipada de registerPush.
+   * @param push Dependencia tipada de push.
+   * @param removePush Dependencia tipada de removePush.
    */
-  constructor(private readonly push: PushUseCase) {}
+  constructor(
+    private readonly registerPush: RegisterPushUseCase,
+    push: CrudPushUseCase,
+    private readonly removePush: RemovePushUseCase
+  ) {
+    super(push);
+  }
   /**
    * Registers the authenticated owner device without returning its token.
    * @param input Validated operation fields.
    * @param request Explicit request value for this operation.
    * @returns The authorized result or completion of the operation.
    */
-  @Post() @Permissions("notifications:devices") register(@Body() input: PushDeviceDto, @Req() request: AuthRequest) {
-    return this.push.register(input, request.user);
+  @Post() @Permissions(PermissionCode.NotificationsDevices) register(
+    @Body() input: PushDeviceDto,
+    @Req() request: AuthRequest
+  ) {
+    return this.registerPush.execute(input, request.user);
   }
   /**
    * Lists bounded records within the current ownership scope.
@@ -34,8 +49,11 @@ export class PushController {
    * @param request Explicit request value for this operation.
    * @returns The authorized result or completion of the operation.
    */
-  @Get() @Permissions("notifications:devices") list(@Query() page: PaginationDto, @Req() request: AuthRequest) {
-    return this.push.list(page, request.user);
+  @Get() @Permissions(PermissionCode.NotificationsDevices) list(
+    @Query() page: PaginationDto,
+    @Req() request: AuthRequest
+  ) {
+    return this.crud("list", page, request.user);
   }
   /**
    * Disables only a device belonging to the authenticated owner.
@@ -43,10 +61,10 @@ export class PushController {
    * @param request Explicit request value for this operation.
    * @returns The authorized result or completion of the operation.
    */
-  @Delete(":id") @HttpCode(204) @Permissions("notifications:devices") remove(
+  @Delete(":id") @HttpCode(204) @Permissions(PermissionCode.NotificationsDevices) remove(
     @Param("id", ParseUUIDPipe) id: string,
     @Req() request: AuthRequest
   ) {
-    return this.push.remove(id, request.user);
+    return this.removePush.execute(id, request.user);
   }
 }

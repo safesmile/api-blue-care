@@ -1,7 +1,7 @@
 import { BadRequestException, type INestApplication } from "@nestjs/common";
 import request from "supertest";
 import { AccountActionsController } from "../../../modules/auth/presentation/account-actions.controller";
-import { AccountActionsUseCase } from "../../../modules/auth/application/account-actions.usecase";
+import { AccountActionsUseCase } from "../../helpers/usecases/AccountActionsUseCase";
 import { controllerApp } from "../../helpers/controller-app";
 import { userFixture } from "../../helpers/identity.fixture";
 describe("AccountActionsController", () => {
@@ -17,7 +17,7 @@ describe("AccountActionsController", () => {
   const user = userFixture().toView();
   const token = "a".repeat(80);
   beforeAll(async () => {
-    app = await controllerApp(AccountActionsController, [{ provide: AccountActionsUseCase, useValue: actions }], user);
+    app = await controllerApp(AccountActionsController, [...AccountActionsUseCase.providers(actions)], user);
   });
   beforeEach(() => jest.resetAllMocks());
   afterAll(async () => {

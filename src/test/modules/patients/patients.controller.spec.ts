@@ -1,6 +1,6 @@
 import request from "supertest";
 import { PatientsController } from "../../../modules/patients/presentation/patients.controller";
-import { PatientsUseCase } from "../../../modules/patients/application/patients.usecase";
+import { PatientsUseCase } from "../../helpers/usecases/PatientsUseCase";
 import { controllerApp } from "../../helpers/controller-app";
 import { userFixture } from "../../helpers/identity.fixture";
 describe("PatientsController", () => {
@@ -22,7 +22,7 @@ describe("PatientsController", () => {
   const input = { firstName: "Patient", lastName: "Example", clinicId: id };
   let app;
   beforeAll(async () => {
-    app = await controllerApp(PatientsController, [{ provide: PatientsUseCase, useValue: patients }], actor);
+    app = await controllerApp(PatientsController, [...PatientsUseCase.providers(patients)], actor);
   });
   afterAll(async () => {
     await app.close();

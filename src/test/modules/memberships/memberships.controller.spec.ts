@@ -1,6 +1,6 @@
 import request from "supertest";
 import { MembershipsController } from "../../../modules/memberships/presentation/memberships.controller";
-import { MembershipsUseCase } from "../../../modules/memberships/application/memberships.usecase";
+import { MembershipsUseCase } from "../../helpers/usecases/MembershipsUseCase";
 import { controllerApp } from "../../helpers/controller-app";
 import { userFixture } from "../../helpers/identity.fixture";
 describe("MembershipsController", () => {
@@ -19,7 +19,7 @@ describe("MembershipsController", () => {
     input = { planVersionId: id, cadence: "monthly" };
   let app;
   beforeAll(async () => {
-    app = await controllerApp(MembershipsController, [{ provide: MembershipsUseCase, useValue: service }], actor);
+    app = await controllerApp(MembershipsController, [...MembershipsUseCase.providers(service)], actor);
   });
   afterAll(async () => {
     await app.close();

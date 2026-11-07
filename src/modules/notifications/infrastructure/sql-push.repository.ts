@@ -10,8 +10,8 @@ const DEVICE_COLUMNS = 'id,platform,enabled,"createdAt","updatedAt"';
 @Injectable()
 export class SqlPushRepository extends PushRepository {
   /**
-   * Receives the explicit persistence and transport dependencies.
-   * @param db PostgreSQL connection.
+   * Recibe las dependencias de la operación.
+   * @param db Dependencia tipada de db.
    */
   constructor(private readonly db: Sequelize) {
     super();
@@ -35,7 +35,7 @@ export class SqlPushRepository extends PushRepository {
           { replacements: { hash }, transaction, type: QueryTypes.SELECT }
         );
         if (existing && existing.userId !== userId)
-          throw new ConflictException("Device is already registered to another account");
+          throw new ConflictException("El dispositivo ya está registrado en otra cuenta");
         const [device] = await this.db.query<PushDevice>(
           existing
             ? 'UPDATE push_devices SET enabled=TRUE,platform=:platform,"updatedAt"=NOW() WHERE id=:id RETURNING ' +
@@ -58,7 +58,8 @@ export class SqlPushRepository extends PushRepository {
         return device;
       });
     } catch (error) {
-      if (error instanceof UniqueConstraintError) throw new ConflictException("Device registration conflict");
+      if (error instanceof UniqueConstraintError)
+        throw new ConflictException("No se pudo registrar el dispositivo porque existe un conflicto");
       if (error instanceof DatabaseError) throw new Error("Push registration failed; transaction rolled back");
       throw error;
     }

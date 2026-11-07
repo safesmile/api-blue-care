@@ -1,3 +1,4 @@
+import { clinicScopeParams } from "../../clinics/infrastructure/clinic-scope";
 import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import { Sequelize } from "sequelize-typescript";
 import { DatabaseError, QueryTypes, Transaction, UniqueConstraintError } from "sequelize";
@@ -35,10 +36,10 @@ const CONSUMPTION =
 @Injectable()
 export class SqlBenefitOperationsRepository extends BenefitOperationsRepository {
   /**
-   * Initializes the benefit service dependencies.
-   * @param db PostgreSQL connection.
-   * @param context Transactional resource and quota resolver.
-   * @param clinics Current clinic assignment boundary.
+   * Recibe las dependencias de la operación.
+   * @param db Dependencia tipada de db.
+   * @param context Dependencia tipada de context.
+   * @param clinics Dependencia tipada de clinics.
    */
   constructor(
     private readonly db: Sequelize,
@@ -93,7 +94,7 @@ export class SqlBenefitOperationsRepository extends BenefitOperationsRepository 
           'SELECT COUNT(*)::int total FROM beneficiary_slots WHERE "patientId"=:patientId',
           { replacements: { patientId: member.patientId }, transaction, type: QueryTypes.SELECT }
         );
-        if (count.total >= max) throw new ConflictException("Maximum additional beneficiaries reached");
+        if (count.total >= max) throw new ConflictException("Se alcanzó el máximo de beneficiarios adicionales");
         await this.notDuplicate(member.patientId, input, transaction);
         const slotId = randomUUID(),
           beneficiaryId = randomUUID(),
@@ -152,16 +153,18 @@ export class SqlBenefitOperationsRepository extends BenefitOperationsRepository 
         WHERE s."patientId"=:patientId AND b.id=:beneficiaryId FOR UPDATE OF s`,
           { replacements: { patientId: member.patientId, beneficiaryId }, transaction, type: QueryTypes.SELECT }
         );
-        if (!before) throw new NotFoundException("Current beneficiary not found");
+        if (!before) throw new NotFoundException("No se encontró el beneficiario vigente");
         if (now < before.lockedUntil)
-          throw new ConflictException("Beneficiary cannot be replaced until its annual lock ends");
+          throw new ConflictException("El beneficiario no puede reemplazarse hasta que finalice su bloqueo anual");
         const max = await this.familyLimit(member, transaction);
         const [count] = await this.db.query<{ total: number }>(
           'SELECT COUNT(*)::int total FROM beneficiary_slots WHERE "patientId"=:patientId',
           { replacements: { patientId: member.patientId }, transaction, type: QueryTypes.SELECT }
         );
         if (count.total > max)
-          throw new ConflictException("Preserved family exceeds the new maximum; new persons cannot be added");
+          throw new ConflictException(
+            "Los familiares existentes superan el nuevo máximo; no se pueden agregar más personas"
+          );
         await this.notDuplicate(member.patientId, input, transaction);
         const value = await this.createBeneficiary(before.slotId, randomUUID(), input, now, transaction),
           lockedUntil = periodEnd(now, 1, "annual");
@@ -297,7 +300,7 @@ export class SqlBenefitOperationsRepository extends BenefitOperationsRepository 
           transaction,
           type: QueryTypes.SELECT
         });
-        if (!hint) throw new NotFoundException("Presentation ticket not found");
+        if (!hint) throw new NotFoundException("No se encontró el comprobante de presentación");
         const member = await this.context.membership(hint.membershipId, actor, false, transaction, true, true);
         const [ticket] = await this.db.query<TicketRow>("SELECT * FROM benefit_tickets WHERE id=:id FOR UPDATE", {
           replacements: { id: hint.id },
@@ -333,7 +336,7 @@ export class SqlBenefitOperationsRepository extends BenefitOperationsRepository 
           transaction,
           type: QueryTypes.SELECT
         });
-        if (!hint) throw new NotFoundException("Consumption not found");
+        if (!hint) throw new NotFoundException("No se encontró el consumo");
         const member = await this.context.membership(hint.membershipId, actor, false, transaction, true, true);
         await this.clinics.require(hint.clinicId, actor, transaction);
         const [existing] = await this.db.query<ReversalView>(
@@ -343,7 +346,7 @@ export class SqlBenefitOperationsRepository extends BenefitOperationsRepository 
         if (existing) {
           if (existing.consumptionId === id && existing.idempotencyKey === idempotencyKey && existing.reason === reason)
             return existing;
-          throw new ConflictException("Consumption is already reversed or operation key was reused");
+          throw new ConflictException("El consumo ya fue anulado o la clave de operación ya se utilizó");
         }
         const name = await this.context.actorName(actor, transaction),
           now = await this.context.now(transaction);
@@ -389,12 +392,21 @@ export class SqlBenefitOperationsRepository extends BenefitOperationsRepository 
     return this.db.transaction({ isolationLevel: Transaction.ISOLATION_LEVELS.REPEATABLE_READ }, async transaction => {
       await this.context.membership(id, actor, own, transaction);
       const items = await this.db.query<ConsumptionView>(
-        CONSUMPTION + ' WHERE c."membershipId"=:id ORDER BY c."occurredAt" DESC,c.id DESC LIMIT :limit OFFSET :offset',
-        { replacements: { id, ...page }, transaction, type: QueryTypes.SELECT }
+        CONSUMPTION +
+          `
+ WHERE c."membershipId"=:id
+ AND (:own
+ OR blue_care_clinic_allowed(:actorId,c."clinicId",CAST(:currentClinicId AS UUID),CAST(:clinicPermission AS TEXT)))
+ ORDER BY c."occurredAt" DESC,c.id DESC LIMIT :limit OFFSET :offset`,
+        { replacements: { id, ...page, own, ...clinicScopeParams(actor) }, transaction, type: QueryTypes.SELECT }
       );
       const [count] = await this.db.query<{ total: number }>(
-        'SELECT COUNT(*)::int total FROM benefit_consumptions WHERE "membershipId"=:id',
-        { replacements: { id }, transaction, type: QueryTypes.SELECT }
+        `SELECT COUNT(*)::int total
+ FROM benefit_consumptions c
+ WHERE c."membershipId"=:id
+ AND (:own
+ OR blue_care_clinic_allowed(:actorId,c."clinicId",CAST(:currentClinicId AS UUID),CAST(:clinicPermission AS TEXT)))`,
+        { replacements: { id, own, ...clinicScopeParams(actor) }, transaction, type: QueryTypes.SELECT }
       );
       return { items, total: count.total };
     });
@@ -452,7 +464,7 @@ export class SqlBenefitOperationsRepository extends BenefitOperationsRepository 
         existing.serviceReference !== input.serviceReference ||
         existing.ticketId !== (ticket?.id ?? null)
       )
-        throw new ConflictException("Operation key reused with different consumption data");
+        throw new ConflictException("La clave de operación ya se utilizó con otros datos de consumo");
       return existing;
     }
     const benefit = await this.context.benefit(input.benefitId, member, transaction, true);
@@ -460,7 +472,7 @@ export class SqlBenefitOperationsRepository extends BenefitOperationsRepository 
       name = await this.context.actorName(actor, transaction),
       now = await this.context.now(transaction);
     if (ticket && (ticket.consumedAt || now >= ticket.expiresAt))
-      throw new ConflictException("Presentation ticket expired or already used");
+      throw new ConflictException("El comprobante de presentación venció o ya se utilizó");
     const balance = await this.context.balance(member, benefit, recipient, input.beneficiaryId, now, transaction);
     this.sufficient(balance, input.units);
     const [clinic] = await this.db.query<{ name: string }>("SELECT name FROM clinics WHERE id=:id", {
@@ -520,7 +532,9 @@ export class SqlBenefitOperationsRepository extends BenefitOperationsRepository 
    */
   private sufficient(balance: BenefitBalance, units: number) {
     if (!Number.isSafeInteger(units) || units < 1 || balance.remainingUnits < units)
-      throw new ConflictException("Insufficient global benefit balance or recipient is ineligible");
+      throw new ConflictException(
+        "El saldo global del beneficio es insuficiente o la persona no cumple los requisitos"
+      );
   }
   /**
    * Validates and coordinates the authorized benefit operation.
@@ -556,7 +570,7 @@ export class SqlBenefitOperationsRepository extends BenefitOperationsRepository 
         type: QueryTypes.SELECT
       }
     );
-    if (row) throw new ConflictException("An identical current beneficiary is already registered");
+    if (row) throw new ConflictException("Ya existe un beneficiario vigente con estos datos");
   }
   /**
    * Validates and coordinates the authorized benefit operation.
@@ -575,7 +589,8 @@ export class SqlBenefitOperationsRepository extends BenefitOperationsRepository 
     transaction: Transaction
   ) {
     const [row] = await this.db.query<Omit<BeneficiaryView, "number" | "lockedUntil">>(
-      'INSERT INTO beneficiaries (id,"slotId","firstName","lastName","birthDate","createdAt") VALUES (:id,:slotId,:firstName,:lastName,:birthDate,:now) RETURNING *',
+      `INSERT INTO beneficiaries (id,"slotId","firstName","lastName","birthDate","createdAt") VALUES (:id,:slotId,:firstName,:lastName,:birthDate,:now)
+ RETURNING *`,
       {
         replacements: { ...input, id, slotId, birthDate: input.birthDate ?? null, now },
         transaction,
@@ -602,10 +617,10 @@ export class SqlBenefitOperationsRepository extends BenefitOperationsRepository 
       return await operation();
     } catch (error) {
       if (error instanceof UniqueConstraintError)
-        throw new ConflictException("Duplicate operation key or service reference");
+        throw new ConflictException("La clave de operación o la referencia del servicio ya existen");
       if (error instanceof DatabaseError) {
         if (["40001", "40P01"].includes((error.original as { code?: string }).code ?? ""))
-          throw new ConflictException("Concurrent resource change; retry the same operation");
+          throw new ConflictException("El recurso cambió durante la operación; vuelva a intentar la misma solicitud");
         throw new Error("Benefit persistence failed; resource transaction rolled back");
       }
       throw error;

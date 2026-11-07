@@ -1,6 +1,6 @@
 import request from "supertest";
 import { RolesController } from "../../../modules/authorization/presentation/roles.controller";
-import { RolesUseCase } from "../../../modules/authorization/application/roles.usecase";
+import { RolesUseCase } from "../../helpers/usecases/RolesUseCase";
 import { controllerApp } from "../../helpers/controller-app";
 import { userFixture } from "../../helpers/identity.fixture";
 describe("RolesController", () => {
@@ -16,7 +16,7 @@ describe("RolesController", () => {
   const input = { name: "reception", description: "Reception", permissions: ["auth:me"] };
   let app;
   beforeAll(async () => {
-    app = await controllerApp(RolesController, [{ provide: RolesUseCase, useValue: roles }], actor);
+    app = await controllerApp(RolesController, [...RolesUseCase.providers(roles)], actor);
   });
   afterAll(async () => {
     await app.close();

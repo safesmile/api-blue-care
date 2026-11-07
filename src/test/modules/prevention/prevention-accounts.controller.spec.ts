@@ -1,6 +1,6 @@
 import request from "supertest";
 import { PreventionAccountsController } from "../../../modules/prevention/presentation/prevention-accounts.controller";
-import { PreventionUseCase } from "../../../modules/prevention/application/prevention.usecase";
+import { PreventionUseCase } from "../../helpers/usecases/PreventionUseCase";
 import { controllerApp } from "../../helpers/controller-app";
 import { userFixture } from "../../helpers/identity.fixture";
 describe("PreventionAccountsController", () => {
@@ -8,11 +8,7 @@ describe("PreventionAccountsController", () => {
     const service = { list: jest.fn(), read: jest.fn() },
       actor = userFixture().toView(),
       id = "ba50a6d7-3ec5-4fb0-9145-2febbfaf8de8";
-    const app = await controllerApp(
-      PreventionAccountsController,
-      [{ provide: PreventionUseCase, useValue: service }],
-      actor
-    );
+    const app = await controllerApp(PreventionAccountsController, [...PreventionUseCase.providers(service)], actor);
     try {
       await request(app.getHttpServer()).get("/prevention/me/events").expect(200);
       await request(app.getHttpServer())

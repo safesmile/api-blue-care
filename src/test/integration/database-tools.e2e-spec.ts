@@ -66,6 +66,13 @@ describe("TypeScript database commands", () => {
     });
     expect(users).toHaveLength(3);
     expect(users.every(user => user.verified && user.email.endsWith("@blue-dent.test"))).toBe(true);
+    expect(await db.query("SELECT code FROM clinics", { type: QueryTypes.SELECT })).toEqual([
+      { code: "blue-care-test" }
+    ]);
+    expect(await db.query('SELECT "userId" FROM clinic_staff ORDER BY "userId"', { type: QueryTypes.SELECT })).toEqual([
+      { userId: "00000000-0000-4000-8000-000000000001" },
+      { userId: "00000000-0000-4000-8000-000000000002" }
+    ]);
   }, 90000);
   it("rejects conflicting legacy and TypeScript records without partially rewriting history", async () => {
     const legacy = "202610280001-identity.cjs";

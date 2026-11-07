@@ -1,14 +1,15 @@
+import { PermissionCode } from "../../../shared/domain/permission-code";
 import { recordChange } from "../../audit/infrastructure/record-change";
 import { identityChange } from "../domain/identity.events";
 import { clinicChange } from "../../clinics/domain/clinic.events";
-import { AccessPolicy, type AccessActor } from "../../authorization/domain/access-policy";
+import { PERSONAL_PERMISSION_CODES, AccessPolicy, type AccessActor } from "../../authorization/domain/access-policy";
 import { Injectable, ConflictException, ForbiddenException } from "@nestjs/common";
 import { InjectModel } from "@nestjs/sequelize";
-import { UniqueConstraintError, QueryTypes } from "sequelize";
+import { Transaction, UniqueConstraintError, QueryTypes } from "sequelize";
 import { IdentityRepository } from "../domain/identity.repository";
 import { Sequelize } from "sequelize-typescript";
 import { AuthorizationStore } from "../../authorization/infrastructure/authorization.store";
-import { User } from "../domain/user";
+import { User, type CollaboratorView } from "../domain/user";
 import { UserModel } from "./user.model";
 import type { Pagination } from "../../../shared/domain/crud.repository";
 /**
@@ -17,10 +18,10 @@ import type { Pagination } from "../../../shared/domain/crud.repository";
 @Injectable()
 export class SequelizeIdentityRepository extends IdentityRepository {
   /**
-   * Receives the dependencies required by this component.
-   * @param model Sequelize model used for persistence.
-   * @param db Database transaction connection.
-   * @param authorization Resolves and persists relational role assignments.
+   * Recibe las dependencias de la operación.
+   * @param model Dependencia tipada de model.
+   * @param db Dependencia tipada de db.
+   * @param authorization Dependencia tipada de authorization.
    */
   constructor(
     @InjectModel(UserModel) private readonly model: typeof UserModel,
@@ -75,7 +76,7 @@ export class SequelizeIdentityRepository extends IdentityRepository {
       });
       return (await this.read(user.id))!;
     } catch (error) {
-      if (error instanceof UniqueConstraintError) throw new ConflictException("Email already exists");
+      if (error instanceof UniqueConstraintError) throw new ConflictException("El correo electrónico ya existe");
       throw error;
     }
   }
@@ -113,6 +114,59 @@ export class SequelizeIdentityRepository extends IdentityRepository {
     };
   }
   /**
+   * Lists staff identities with only clinics visible to the current staff administrator.
+   * @param page Bounded pagination.
+   * @param actor Current operator and selected clinic.
+   * @param id Optional exact identity filter for a detail view.
+   * @returns Scoped staff directory.
+   */
+  async collaborators(page: Pagination, actor: AccessActor, id?: string) {
+    return this.db.transaction({ isolationLevel: Transaction.ISOLATION_LEVELS.REPEATABLE_READ }, async transaction => {
+      const grants = await this.authorization.permissionsFor(
+        await this.authorization.rolesFor(actor.id, transaction),
+        transaction
+      );
+      const global = grants.includes(PermissionCode.ClinicsAll) && grants.includes(PermissionCode.ClinicsStaffList);
+      const visible = `SELECT 1 FROM clinic_staff s JOIN clinics c ON c.id=s."clinicId"
+        WHERE s."userId"=u.id AND c.enabled AND (:selected IS NULL OR c.id=CAST(:selected AS UUID))
+        AND (:global OR blue_care_clinic_allowed(:actorId,c.id,CAST(:selected AS UUID),'clinics:staff-list'))`;
+      const filter = `WHERE (:id IS NULL OR u.id=CAST(:id AS UUID)) AND (EXISTS(SELECT 1 FROM staff_profiles sp WHERE sp."userId"=u.id)
+        OR EXISTS(SELECT 1 FROM user_roles ur JOIN roles r ON r.id=ur."roleId"
+        LEFT JOIN role_permissions rp ON rp."roleId"=r.id WHERE ur."userId"=u.id AND ur."clinicId" IS NULL
+        AND (r.name='staff' OR rp."permissionCode" NOT IN (:personal))))
+      AND ((:global AND :selected IS NULL) OR EXISTS(${visible}))`;
+      const replacements = {
+        ...page,
+        personal: PERSONAL_PERMISSION_CODES,
+        id: id ?? null,
+        actorId: actor.id,
+        selected: actor.clinicId ?? null,
+        global
+      };
+      const rows = await this.db.query<Omit<CollaboratorView, "roles" | "clinics">>(
+        `SELECT u.id,u.email,u.name,u."firstName",u."lastName",u.enabled,u.verified FROM users u ${filter} ORDER BY u.name,u.id LIMIT :limit OFFSET :offset`,
+        { replacements, transaction, type: QueryTypes.SELECT }
+      );
+      const [count] = await this.db.query<{ total: number }>(`SELECT COUNT(*)::int AS total FROM users u ${filter}`, {
+        replacements,
+        transaction,
+        type: QueryTypes.SELECT
+      });
+      const items: CollaboratorView[] = [];
+      for (const user of rows) {
+        const clinics = await this.db.query<{ id: string; name: string; roles: string[] }>(
+          `SELECT c.id,c.name,COALESCE((SELECT ARRAY_AGG(r.name ORDER BY r.name) FROM user_roles ur JOIN roles r ON r.id=ur."roleId"
+          WHERE ur."userId"=:userId AND ur."clinicId"=c.id),'{}') AS roles
+          FROM clinics c JOIN clinic_staff s ON s."clinicId"=c.id WHERE s."userId"=:userId AND c.enabled AND (:selected IS NULL OR c.id=CAST(:selected AS UUID))
+          AND (:global OR blue_care_clinic_allowed(:actorId,c.id,CAST(:selected AS UUID),'clinics:staff-list')) ORDER BY c.name,c.id`,
+          { replacements: { ...replacements, userId: user.id }, transaction, type: QueryTypes.SELECT }
+        );
+        items.push({ ...user, roles: global ? await this.authorization.rolesFor(user.id, transaction) : [], clinics });
+      }
+      return { items, total: count.total };
+    });
+  }
+  /**
    * Updates the permitted resource properties.
    * @param user Domain user to persist.
    * @param actor Authenticated caller and current effective grants.
@@ -122,13 +176,13 @@ export class SequelizeIdentityRepository extends IdentityRepository {
   async update(user: User, actor?: AccessActor, assignRoles = false) {
     await this.db.transaction(async transaction => {
       const current = await this.model.findByPk(user.id, { transaction, lock: transaction.LOCK.UPDATE });
-      if (!current) throw new ConflictException("User no longer exists");
+      if (!current) throw new ConflictException("El usuario ya no existe");
       const before = {
         ...current.get({ plain: true }),
         roles: await this.authorization.rolesFor(user.id, transaction)
       };
       if (!AccessPolicy.protectedAccount(actor, await this.authorization.rolesFor(user.id, transaction)))
-        throw new ForbiddenException("Only superadmin may modify superadmin accounts");
+        throw new ForbiddenException("Solo un superadministrador puede modificar cuentas de superadministrador");
       if (assignRoles && actor) await this.authorization.assertAssignable(user.props.roles, actor, transaction);
       const { roles, name, enabled, firstName, lastName } = user.props;
       await this.model.update({ name, enabled, firstName, lastName }, { where: { id: user.id }, transaction });
@@ -162,9 +216,12 @@ export class SequelizeIdentityRepository extends IdentityRepository {
         transaction,
         type: QueryTypes.SELECT
       });
-      if (linkedPatient) throw new ConflictException("Account has a linked patient; deactivate the account instead");
+      if (linkedPatient)
+        throw new ConflictException(
+          "La cuenta tiene un paciente vinculado; desactive la cuenta en lugar de eliminarla"
+        );
       if (!AccessPolicy.protectedAccount(actor, await this.authorization.rolesFor(id, transaction)))
-        throw new ForbiddenException("Only superadmin may modify superadmin accounts");
+        throw new ForbiddenException("Solo un superadministrador puede modificar cuentas de superadministrador");
       await recordChange(
         this.db,
         transaction,

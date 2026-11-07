@@ -1,7 +1,7 @@
 import { Test } from "@nestjs/testing";
 import request from "supertest";
 import { MembershipJobsController } from "../../../modules/memberships/presentation/membership-jobs.controller";
-import { MembershipsUseCase } from "../../../modules/memberships/application/memberships.usecase";
+import { MembershipsUseCase } from "../../helpers/usecases/MembershipsUseCase";
 import { GoogleJobGuard } from "../../../infrastructure/jobs/google-job.guard";
 describe("MembershipJobsController", () => {
   let app;
@@ -9,7 +9,7 @@ describe("MembershipJobsController", () => {
   beforeAll(async () => {
     const module = await Test.createTestingModule({
       controllers: [MembershipJobsController],
-      providers: [{ provide: MembershipsUseCase, useValue: service }]
+      providers: [...MembershipsUseCase.providers(service)]
     })
       .overrideGuard(GoogleJobGuard)
       .useValue({ canActivate: () => true })

@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException } from "@nestjs/common";
-import { BenefitOperationsUseCase } from "../../../modules/benefits/application/benefit-operations.usecase";
+import { BenefitOperationsUseCase } from "../../helpers/usecases/BenefitOperationsUseCase";
 import { REGISTERED_PERMISSIONS } from "../../../modules/authorization/infrastructure/permission-registry";
 import { userFixture } from "../../helpers/identity.fixture";
 describe("BenefitOperationsUseCase", () => {

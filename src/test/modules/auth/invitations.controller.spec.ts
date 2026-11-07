@@ -1,7 +1,7 @@
 import { GoneException, type INestApplication } from "@nestjs/common";
 import request from "supertest";
 import { InvitationsController } from "../../../modules/auth/presentation/invitations.controller";
-import { InvitationsUseCase } from "../../../modules/auth/application/invitations.usecase";
+import { InvitationsUseCase } from "../../helpers/usecases/InvitationsUseCase";
 import { controllerApp } from "../../helpers/controller-app";
 import { userFixture } from "../../helpers/identity.fixture";
 describe("InvitationsController", () => {
@@ -10,6 +10,9 @@ describe("InvitationsController", () => {
   const token = "b".repeat(80);
   const id = actor.id;
   const invitations = {
+    invitePatient: jest.fn(),
+    inviteCollaborator: jest.fn(),
+    collaboratorRoles: jest.fn(),
     create: jest.fn(),
     list: jest.fn(),
     preview: jest.fn(),
@@ -18,18 +21,24 @@ describe("InvitationsController", () => {
     revoke: jest.fn()
   };
   beforeAll(async () => {
-    app = await controllerApp(InvitationsController, [{ provide: InvitationsUseCase, useValue: invitations }], actor);
+    app = await controllerApp(InvitationsController, [...InvitationsUseCase.providers(invitations)], actor);
   });
   beforeEach(() => jest.resetAllMocks());
   afterAll(async () => {
     await app.close();
   });
   it("records the real inviter rather than trusting body metadata", async () => {
-    const input = { email: " INVITED@BLUE.TEST ", firstName: " Ana ", lastName: " López ", roles: ["customer"] };
+    const input = {
+      email: " INVITED@BLUE.TEST ",
+      firstName: " Ana ",
+      lastName: " López ",
+      roles: ["customer"],
+      clinicAssignments: []
+    };
     invitations.create.mockResolvedValue({ id });
     await request(app.getHttpServer()).post("/auth/invitations").send(input).expect(201, { id });
     expect(invitations.create).toHaveBeenCalledWith(
-      { email: "invited@blue.test", firstName: "Ana", lastName: "López", roles: ["customer"] },
+      { email: "invited@blue.test", firstName: "Ana", lastName: "López", roles: ["customer"], clinicAssignments: [] },
       actor
     );
   });
@@ -43,7 +52,7 @@ describe("InvitationsController", () => {
   it("lists invitations using bounded pagination", async () => {
     invitations.list.mockResolvedValue({ items: [], total: 0 });
     await request(app.getHttpServer()).get("/auth/invitations?limit=10&offset=2").expect(200, { items: [], total: 0 });
-    expect(invitations.list).toHaveBeenCalledWith({ limit: 10, offset: 2 });
+    expect(invitations.list).toHaveBeenCalledWith({ limit: 10, offset: 2 }, actor);
   });
   it("reads and validates the token from the URL query", async () => {
     invitations.preview.mockResolvedValue({ status: "pending" });
@@ -88,5 +97,34 @@ describe("InvitationsController", () => {
       .send({ token, password: "Abcd123!", roles: ["superadmin"], userId: actor.id })
       .expect(400);
     expect(invitations.accept).not.toHaveBeenCalled();
+  });
+  it("exposes separate contact forms and refuses role or clinic injection into patient invitations", async () => {
+    const contact = { email: "patient@blue.test", firstName: "Patient", lastName: "Test" };
+    invitations.invitePatient.mockResolvedValue({ id });
+    await request(app.getHttpServer()).post("/auth/invitations/patients").send(contact).expect(201, { id });
+    expect(invitations.invitePatient).toHaveBeenCalledWith(contact, actor);
+    for (const extra of [
+      { roles: ["admin"] },
+      { staff: true },
+      { clinicId: id },
+      { kind: "collaborator" },
+      { clinicAssignments: [] }
+    ])
+      await request(app.getHttpServer())
+        .post("/auth/invitations/patients")
+        .send({ ...contact, ...extra })
+        .expect(400);
+    const collaborator = { ...contact, clinicId: id, role: "reception" };
+    await request(app.getHttpServer()).post("/auth/invitations/collaborators").send(collaborator).expect(201);
+    expect(invitations.inviteCollaborator).toHaveBeenCalledWith(collaborator, actor);
+    await request(app.getHttpServer()).post("/auth/invitations/collaborators").send(contact).expect(400);
+    await request(app.getHttpServer()).get("/auth/invitations/collaborators/roles").query({ clinicId: id }).expect(200);
+    expect(invitations.collaboratorRoles).toHaveBeenCalledWith(id, actor);
+    await request(app.getHttpServer())
+      .get("/auth/invitations/collaborators/roles")
+      .query({ clinicId: "invalid" })
+      .expect(400);
+    await request(app.getHttpServer()).get("/auth/invitations").query({ kind: "patient", limit: 10 }).expect(200);
+    expect(invitations.list).toHaveBeenLastCalledWith({ kind: "patient", limit: 10, offset: 0 }, actor);
   });
 });

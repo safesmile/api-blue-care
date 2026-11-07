@@ -41,7 +41,7 @@ describe("Email transport", () => {
         subject: "Test",
         text: "Body"
       })
-    ).rejects.toThrow("not configured");
+    ).rejects.toThrow("no está configurado");
   });
   it("brands durable plain notifications at delivery time and preserves explicit trusted HTML", async () => {
     const sender = new SmtpEmailSender(

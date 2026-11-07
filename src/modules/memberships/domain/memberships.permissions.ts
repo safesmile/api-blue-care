@@ -1,36 +1,37 @@
+import { PermissionCode } from "../../../shared/domain/permission-code";
 export const MEMBERSHIPS_PERMISSION_DEFINITIONS = [
   {
-    shortcode: "memberships:create",
+    shortcode: PermissionCode.MembershipsCreate,
     scope: "memberships.create",
     group: "memberships",
     description: "create memberships with explicit operation authority"
   },
   {
-    shortcode: "memberships:read",
+    shortcode: PermissionCode.MembershipsRead,
     scope: "memberships.read",
     group: "memberships",
     description: "read memberships with explicit operation authority"
   },
   {
-    shortcode: "memberships:list",
+    shortcode: PermissionCode.MembershipsList,
     scope: "memberships.list",
     group: "memberships",
     description: "list memberships with explicit operation authority"
   },
   {
-    shortcode: "memberships:cancel",
+    shortcode: PermissionCode.MembershipsCancel,
     scope: "memberships.cancel",
     group: "memberships",
     description: "cancel memberships with explicit operation authority"
   },
   {
-    shortcode: "memberships:suspend",
+    shortcode: PermissionCode.MembershipsSuspend,
     scope: "memberships.suspend",
     group: "memberships",
     description: "suspend memberships with explicit operation authority"
   },
   {
-    shortcode: "memberships:self",
+    shortcode: PermissionCode.MembershipsSelf,
     scope: "memberships.self",
     group: "memberships",
     description: "Operate on memberships of your linked patient only"

@@ -9,9 +9,9 @@ import { AccountMailer, type AccountActionKind, type MailContext } from "../doma
 @Injectable()
 export class SmtpAccountMailer extends AccountMailer {
   /**
-   * Receives the dependencies required by this component.
-   * @param config Validated application configuration.
-   * @param sender Shared email transport for account links.
+   * Recibe las dependencias de la operación.
+   * @param config Dependencia tipada de config.
+   * @param sender Dependencia tipada de sender.
    */
   constructor(
     private readonly config: ConfigService,
@@ -33,7 +33,7 @@ export class SmtpAccountMailer extends AccountMailer {
         ? !this.config.get("SENDGRID_API_KEY")
         : !this.config.get("SMTP_HOST"))
     )
-      throw new ServiceUnavailableException("Email is not configured");
+      throw new ServiceUnavailableException("El servicio de correo electrónico no está configurado");
     const paths = {
       invite: "/accept-invitation",
       reset: "/reset-password",

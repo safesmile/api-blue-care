@@ -5,10 +5,13 @@ import request from "supertest";
 import { AppModule } from "../../app.module";
 import { EmailSender } from "../../shared/domain/email-sender";
 import { NotificationRepository } from "../../modules/notifications/domain/notification.repository";
-import { NotificationsUseCase } from "../../modules/notifications/application/notifications.usecase";
+import { NotificationsUseCase } from "../helpers/usecases/NotificationsUseCase";
 import type { Delivery } from "../../modules/notifications/domain/notification.repository";
 describe("Durable notification delivery (disposable PostgreSQL)", () => {
-  let app, db: Sequelize, repository: NotificationRepository, notifications: NotificationsUseCase;
+  let app,
+    db: Sequelize,
+    repository: NotificationRepository,
+    notifications: ReturnType<typeof NotificationsUseCase.resolve>;
   const owner = randomUUID(),
     other = randomUUID(),
     send = jest.fn();
@@ -22,7 +25,7 @@ describe("Durable notification delivery (disposable PostgreSQL)", () => {
     await app.init();
     db = app.get(Sequelize);
     repository = app.get(NotificationRepository);
-    notifications = app.get(NotificationsUseCase);
+    notifications = NotificationsUseCase.resolve(app);
     for (const id of [owner, other])
       await db.query(
         `INSERT INTO users

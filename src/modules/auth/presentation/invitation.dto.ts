@@ -1,7 +1,12 @@
+import { PaginationDto } from "../../identity/presentation/user.dto";
 import { AuditReasonDto } from "../../../shared/presentation/audit-reason.dto";
-import { Transform } from "class-transformer";
+import { Type, Transform } from "class-transformer";
 import {
+  IsIn,
+  IsBoolean,
   ArrayMinSize,
+  ArrayMaxSize,
+  ValidateNested,
   ArrayUnique,
   IsArray,
   IsEmail,
@@ -13,11 +18,8 @@ import {
   MaxLength
 } from "class-validator";
 import { type RoleName } from "../../../permissions";
-/**
- * Defines and validates the HTTP input fields.
- */
-export class CreateInvitationDto extends AuditReasonDto {
-  @ValidateIf((_o, value) => value !== undefined) @IsUUID() patientId?: string;
+/** Shared registered contact for explicit invitation workflows. */
+export class InvitationContactDto extends AuditReasonDto {
   @Transform(({ value }: { value: unknown }) => (typeof value === "string" ? value.trim().toLowerCase() : value))
   @IsEmail()
   @MaxLength(254)
@@ -30,6 +32,47 @@ export class CreateInvitationDto extends AuditReasonDto {
   @IsString()
   @Length(1, 60)
   lastName!: string;
+}
+/** Patient invitation never accepts staff roles or clinic assignments. */
+export class InvitePatientDto extends InvitationContactDto {
+  @ValidateIf((_o, value) => value !== undefined) @IsUUID() patientId?: string;
+}
+/** One clinic and work role, with a server-selected staff account role. */
+export class InviteCollaboratorDto extends InvitationContactDto {
+  @IsUUID() clinicId!: string;
+  @IsString() @MaxLength(60) @Matches(/^[a-z][a-z0-9-]{1,59}$/) role!: string;
+}
+/** Scope used when looking up delegable clinic roles. */
+export class ClinicRoleQueryDto {
+  @IsUUID() clinicId!: string;
+}
+/** Filter invitation history before counting and pagination. */
+export class InvitationQueryDto extends PaginationDto {
+  @ValidateIf((_o, value) => value !== undefined) @IsIn(["general", "patient", "collaborator"]) kind?:
+    "general" | "patient" | "collaborator";
+}
+/** Explicit roles for each clinic included in the collaborator invitation. */
+export class InvitationClinicDto {
+  @IsUUID() clinicId!: string;
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayUnique()
+  @IsString({ each: true })
+  @MaxLength(60, { each: true })
+  @Matches(/^[a-z][a-z0-9-]{1,59}$/, { each: true })
+  roles!: string[];
+}
+/**
+ * Defines and validates the HTTP input fields.
+ */
+export class CreateInvitationDto extends InvitationContactDto {
+  @ValidateIf((_o, value) => value !== undefined) @IsBoolean() staff?: boolean;
+  @IsArray()
+  @ArrayMaxSize(100)
+  @ValidateNested({ each: true })
+  @Type(() => InvitationClinicDto)
+  clinicAssignments!: InvitationClinicDto[];
+  @ValidateIf((_o, value) => value !== undefined) @IsUUID() patientId?: string;
   @IsArray()
   @ArrayMinSize(1)
   @ArrayUnique()

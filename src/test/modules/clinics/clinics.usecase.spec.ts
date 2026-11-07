@@ -1,9 +1,10 @@
 import { ForbiddenException, NotFoundException } from "@nestjs/common";
-import { ClinicsUseCase } from "../../../modules/clinics/application/clinics.usecase";
+import { ClinicsUseCase } from "../../helpers/usecases/ClinicsUseCase";
 import { REGISTERED_PERMISSIONS } from "../../../modules/authorization/infrastructure/permission-registry";
 import { userFixture } from "../../helpers/identity.fixture";
 describe("ClinicsUseCase", () => {
   const repository = {
+    available: jest.fn(),
     create: jest.fn(),
     read: jest.fn(),
     list: jest.fn(),
@@ -19,7 +20,7 @@ describe("ClinicsUseCase", () => {
   it("requires explicit operation and global authority, independently of role names", () => {
     expect(() => service.list(page, { ...actor, permissions: [] })).toThrow(ForbiddenException);
     expect(() => service.create(input, { ...actor, permissions: ["clinics:create"] })).toThrow(ForbiddenException);
-    expect(() => service.assign("clinic", "user", { ...actor, permissions: ["clinics:staff-manage"] })).toThrow(
+    expect(() => service.assign("clinic", "user", { ...actor, permissions: [] }, ["admin"])).toThrow(
       ForbiddenException
     );
   });
@@ -29,12 +30,13 @@ describe("ClinicsUseCase", () => {
     expect(await service.read("clinic", actor)).toBe(input);
     await service.create(input, actor);
     await service.list(page, actor);
+    await service.available(page, actor);
     await service.update("clinic", { enabled: false }, actor);
     await service.staff("clinic", page, actor);
-    await service.assign("clinic", "user", actor);
+    await service.assign("clinic", "user", actor, ["admin"]);
     await service.unassign("clinic", "user", actor);
     expect(repository.update).toHaveBeenCalledWith("clinic", { enabled: false }, actor);
-    expect(repository.assign).toHaveBeenCalledWith("clinic", "user", actor);
+    expect(repository.assign).toHaveBeenCalledWith("clinic", "user", actor, ["admin"]);
     expect(repository.unassign).toHaveBeenCalledWith("clinic", "user", actor);
   });
 });

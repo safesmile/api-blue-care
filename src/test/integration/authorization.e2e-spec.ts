@@ -1,5 +1,6 @@
+import { ApiValidationPipe } from "../../shared/presentation/api-validation.pipe";
+import { AuthUseCase } from "../helpers/usecases/AuthUseCase";
 import { Test } from "@nestjs/testing";
-import { ValidationPipe } from "@nestjs/common";
 import { Sequelize } from "sequelize-typescript";
 import { QueryTypes } from "sequelize";
 import request from "supertest";
@@ -30,7 +31,7 @@ describe("Dynamic roles and identity access (disposable PostgreSQL)", () => {
       })
       .compile();
     app = module.createNestApplication();
-    app.useGlobalPipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }));
+    app.useGlobalPipes(new ApiValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }));
     await app.init();
     db = app.get(Sequelize);
     await syncPermissions(db);
@@ -141,6 +142,7 @@ describe("Dynamic roles and identity access (disposable PostgreSQL)", () => {
       .auth(rootToken, { type: "bearer" })
       .send({ name: "integration-reception", description: "Own identity", permissions: ["auth:me", "users:read"] })
       .expect(200);
+    customToken = (await AuthUseCase.resolve(app).login(customUser.email, "Abcd123!")).token;
     await request(app.getHttpServer())
       .get("/users/" + customUser.id)
       .auth(customToken, { type: "bearer" })
@@ -232,12 +234,18 @@ describe("Dynamic roles and identity access (disposable PostgreSQL)", () => {
         .expect(201)
     ).body;
     await db.query(
-      "INSERT INTO role_permissions (\"roleId\",\"permissionCode\") SELECT id,'invitations:create' FROM roles WHERE name='admin'"
+      "INSERT INTO role_permissions (\"roleId\",\"permissionCode\") SELECT id,'invitations:create' FROM roles WHERE name='admin' ON CONFLICT DO NOTHING"
     );
     await request(app.getHttpServer())
       .post("/auth/invitations")
       .auth(adminToken, { type: "bearer" })
-      .send({ firstName: "Pending", lastName: "Member", email: "pending-role@blue.test", roles: [role.name] })
+      .send({
+        clinicAssignments: [],
+        firstName: "Pending",
+        lastName: "Member",
+        email: "pending-role@blue.test",
+        roles: [role.name]
+      })
       .expect(201);
     await request(app.getHttpServer())
       .delete("/roles/" + role.id)
@@ -255,14 +263,26 @@ describe("Dynamic roles and identity access (disposable PostgreSQL)", () => {
     await request(app.getHttpServer())
       .post("/auth/invitations")
       .auth(adminToken, { type: "bearer" })
-      .send({ firstName: "Denied", lastName: "Member", email: "denied-role@blue.test", roles: [role.name] })
+      .send({
+        clinicAssignments: [],
+        firstName: "Denied",
+        lastName: "Member",
+        email: "denied-role@blue.test",
+        roles: [role.name]
+      })
       .expect(403);
   });
   it("does not treat an invitation with a deleted inviter as a legacy invitation", async () => {
     await request(app.getHttpServer())
       .post("/auth/invitations")
       .auth(adminToken, { type: "bearer" })
-      .send({ firstName: "After", lastName: "Deletion", email: "deleted-inviter@blue.test", roles: ["customer"] })
+      .send({
+        clinicAssignments: [],
+        firstName: "After",
+        lastName: "Deletion",
+        email: "deleted-inviter@blue.test",
+        roles: ["customer"]
+      })
       .expect(201);
     await request(app.getHttpServer())
       .delete("/users/" + admin.id)

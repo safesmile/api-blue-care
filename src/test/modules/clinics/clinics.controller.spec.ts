@@ -1,10 +1,11 @@
 import request from "supertest";
 import { ClinicsController } from "../../../modules/clinics/presentation/clinics.controller";
-import { ClinicsUseCase } from "../../../modules/clinics/application/clinics.usecase";
+import { ClinicsUseCase } from "../../helpers/usecases/ClinicsUseCase";
 import { controllerApp } from "../../helpers/controller-app";
 import { userFixture } from "../../helpers/identity.fixture";
 describe("ClinicsController", () => {
   const clinics = {
+    available: jest.fn(),
     create: jest.fn(),
     read: jest.fn(),
     list: jest.fn().mockResolvedValue({ items: [], total: 0 }),
@@ -18,7 +19,7 @@ describe("ClinicsController", () => {
     userId = "af9a5c61-1c31-45bc-88bb-b6a02305a54a";
   let app;
   beforeAll(async () => {
-    app = await controllerApp(ClinicsController, [{ provide: ClinicsUseCase, useValue: clinics }], actor);
+    app = await controllerApp(ClinicsController, [...ClinicsUseCase.providers(clinics)], actor);
   });
   afterAll(async () => {
     await app.close();
@@ -28,6 +29,7 @@ describe("ClinicsController", () => {
     await request(app.getHttpServer()).get("/clinics?enabled=false&search=North").expect(200);
     await request(app.getHttpServer()).get("/clinics?enabled=true").expect(200);
     await request(app.getHttpServer()).get("/clinics").expect(200);
+    await request(app.getHttpServer()).get("/clinics/available").expect(200);
     await request(app.getHttpServer())
       .get("/clinics/" + id)
       .expect(200);
@@ -40,12 +42,12 @@ describe("ClinicsController", () => {
       .expect(200);
     await request(app.getHttpServer())
       .put("/clinics/" + id + "/staff/" + userId)
-      .send({ reason: "Assignment" })
+      .send({ reason: "Assignment", roles: ["admin"] })
       .expect(204);
     await request(app.getHttpServer())
       .delete("/clinics/" + id + "/staff/" + userId)
       .expect(204);
-    expect(clinics.assign).toHaveBeenCalledWith(id, userId, actor);
+    expect(clinics.assign).toHaveBeenCalledWith(id, userId, actor, ["admin"]);
     expect(clinics.unassign).toHaveBeenCalledWith(id, userId, actor);
     expect(clinics.update).toHaveBeenCalledWith(id, { enabled: false, address: null }, actor);
   });

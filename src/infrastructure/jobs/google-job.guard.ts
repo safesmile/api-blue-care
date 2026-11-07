@@ -6,8 +6,8 @@ import { OAuth2Client } from "google-auth-library";
 export class GoogleJobGuard implements CanActivate {
   private readonly verifier = new OAuth2Client();
   /**
-   *
-   * @param config Validated application settings.
+   * Recibe las dependencias de la operación.
+   * @param config Dependencia tipada de config.
    */
   constructor(private readonly config: ConfigService) {}
   /**
@@ -16,10 +16,11 @@ export class GoogleJobGuard implements CanActivate {
    * @returns Result of the completed operation.
    */
   async canActivate(context: ExecutionContext) {
-    if (this.config.get("GCP_JOBS_ENABLED") !== "true") throw new UnauthorizedException();
+    if (this.config.get("GCP_JOBS_ENABLED") !== "true")
+      throw new UnauthorizedException("Debe iniciar sesión con una cuenta válida");
     const authorization = context.switchToHttp().getRequest().headers.authorization;
     const token = typeof authorization === "string" ? /^Bearer (\S+)$/.exec(authorization)?.[1] : undefined;
-    if (!token) throw new UnauthorizedException();
+    if (!token) throw new UnauthorizedException("Debe iniciar sesión con una cuenta válida");
     try {
       const ticket = await this.verifier.verifyIdToken({
         idToken: token,
@@ -30,7 +31,7 @@ export class GoogleJobGuard implements CanActivate {
         throw new Error("Invalid job identity");
       return true;
     } catch {
-      throw new UnauthorizedException();
+      throw new UnauthorizedException("Debe iniciar sesión con una cuenta válida");
     }
   }
 }

@@ -1,42 +1,43 @@
+import { PermissionCode } from "../../../shared/domain/permission-code";
 export const AUTH_PERMISSION_DEFINITIONS = [
   {
-    shortcode: "invitations:create",
+    shortcode: PermissionCode.InvitationsCreate,
     scope: "auth.invitations.create",
     group: "Authentication",
     description: "Invite users with explicit roles"
   },
   {
-    shortcode: "auth:me",
+    shortcode: PermissionCode.AuthMe,
     scope: "auth.profile.read",
     group: "Authentication",
     description: "Read the authenticated profile"
   },
   {
-    shortcode: "invitations:list",
+    shortcode: PermissionCode.InvitationsList,
     scope: "auth.invitations.list",
     group: "Authentication",
     description: "List invitation history"
   },
   {
-    shortcode: "invitations:resend",
+    shortcode: PermissionCode.InvitationsResend,
     scope: "auth.invitations.resend",
     group: "Authentication",
     description: "Resend invitations"
   },
   {
-    shortcode: "invitations:revoke",
+    shortcode: PermissionCode.InvitationsRevoke,
     scope: "auth.invitations.revoke",
     group: "Authentication",
     description: "Revoke invitations"
   },
   {
-    shortcode: "auth:password-change",
+    shortcode: PermissionCode.AuthPasswordChange,
     scope: "auth.password.change",
     group: "Authentication",
     description: "Change own password"
   },
   {
-    shortcode: "auth:email-change",
+    shortcode: PermissionCode.AuthEmailChange,
     scope: "auth.email.change",
     group: "Authentication",
     description: "Verify a new own email"

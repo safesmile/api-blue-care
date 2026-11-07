@@ -7,8 +7,8 @@ import { EmailSender, type EmailMessage } from "../../shared/domain/email-sender
 @Injectable()
 export class SmtpEmailSender extends EmailSender {
   /**
-   *
-   * @param config Validated application settings.
+   * Recibe las dependencias de la operación.
+   * @param config Dependencia tipada de config.
    */
   constructor(private readonly config: ConfigService) {
     super();
@@ -23,7 +23,8 @@ export class SmtpEmailSender extends EmailSender {
     const from = this.config.get<string>("EMAIL_FROM");
     const password = sendgrid ? this.config.get<string>("SENDGRID_API_KEY") : this.config.get<string>("SMTP_PASSWORD");
     const user = sendgrid ? "apikey" : this.config.get<string>("SMTP_USER");
-    if (!host || !from || (sendgrid && !password)) throw new ServiceUnavailableException("Email is not configured");
+    if (!host || !from || (sendgrid && !password))
+      throw new ServiceUnavailableException("El servicio de correo electrónico no está configurado");
     const port = sendgrid ? 587 : Number(this.config.get("SMTP_PORT") || 1025);
     const transport = createTransport({
       host,

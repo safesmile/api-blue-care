@@ -1,6 +1,6 @@
 import { loadSecrets } from "../src/infrastructure/config/load-secrets";
 import { NestFactory } from "@nestjs/core";
-import { PreventionUseCase } from "../src/modules/prevention/application/prevention.usecase";
+import { DrainPreventionEventUseCase } from "../src/modules/prevention/application/drainPreventionEvent.usecase";
 /** Generates one bounded batch of preventive reminders without starting an HTTP server. */
 async function main() {
   await loadSecrets();
@@ -8,7 +8,7 @@ async function main() {
   const { AppModule } = require("../src/app.module") as typeof import("../src/app.module");
   const app = await NestFactory.createApplicationContext(AppModule, { logger: ["warn", "error"] });
   try {
-    console.info(await app.get(PreventionUseCase).drain());
+    console.info(await app.get(DrainPreventionEventUseCase).execute());
   } finally {
     await app.close();
   }

@@ -13,8 +13,8 @@ import {
 @Injectable()
 export class SqlNotificationRepository extends NotificationRepository {
   /**
-   *
-   * @param db PostgreSQL transaction connection.
+   * Recibe las dependencias de la operación.
+   * @param db Dependencia tipada de db.
    */
   constructor(private readonly db: Sequelize) {
     super();

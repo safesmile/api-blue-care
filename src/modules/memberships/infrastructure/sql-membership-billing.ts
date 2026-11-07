@@ -28,9 +28,9 @@ interface PaymentEvent extends VerifiedEvent {
 @Injectable()
 export class SqlMembershipBilling extends MembershipBilling {
   /**
-   * Receives the persistence and policy boundaries.
-   * @param db PostgreSQL connection.
-   * @param gateway External provider verification and billing port.
+   * Recibe las dependencias de la operación.
+   * @param db Dependencia tipada de db.
+   * @param gateway Dependencia tipada de gateway.
    */
   constructor(
     private readonly db: Sequelize,
@@ -44,7 +44,8 @@ export class SqlMembershipBilling extends MembershipBilling {
    * @returns The persisted result or completion of the authorized operation.
    */
   async checkout(id: string) {
-    if (!this.gateway.available()) throw new ServiceUnavailableException("Recurrente integration is disabled");
+    if (!this.gateway.available())
+      throw new ServiceUnavailableException("La integración con Recurrente está deshabilitada");
     const request = await this.db.transaction(async transaction => {
       const [record] = await this.db.query<
         MembershipRecord & { name: string; currentVersionId: string; enabled: boolean }
@@ -53,17 +54,19 @@ export class SqlMembershipBilling extends MembershipBilling {
          JOIN plans p ON p.id=v."planId" WHERE m.id=:id FOR UPDATE OF m FOR SHARE OF p`,
         { replacements: { id }, transaction, type: QueryTypes.SELECT }
       );
-      if (!record) throw new NotFoundException("Membership not found");
+      if (!record) throw new NotFoundException("No se encontró la membresía");
       if (record.cancelRequestedAt || record.suspendedAt || record.closedAt || record.periodsCount)
-        throw new ConflictException("Checkout is only available for an unpaid open membership");
+        throw new ConflictException("Solo se puede iniciar un pago para una membresía abierta y pendiente de pago");
       if (record.checkoutStatus === "ready" && record.checkoutExpiresAt && record.checkoutExpiresAt > new Date())
         return { existing: { id: record.checkoutId!, url: record.checkoutUrl! } };
       if (record.checkoutStatus !== "none")
         throw new ConflictException(
-          "Checkout exists, expired or needs provider reconciliation; it will not be duplicated"
+          "El pago ya existe, venció o requiere conciliación con el proveedor; no se creará un duplicado"
         );
       if (!record.enabled || record.currentVersionId !== record.planVersionId)
-        throw new ConflictException("Pending quote is no longer current; cancel it and select the published price");
+        throw new ConflictException(
+          "La cotización pendiente ya no está vigente; cancélela y seleccione el precio publicado"
+        );
       const expiresAt = new Date(Date.now() + 30 * 60000);
       await this.db.query(
         'UPDATE memberships SET "checkoutStatus"=\'creating\',"checkoutStartedAt"=NOW(),"checkoutExpiresAt"=:expiresAt WHERE id=:id',
@@ -89,7 +92,7 @@ export class SqlMembershipBilling extends MembershipBilling {
         { replacements: { id } }
       );
       throw new ServiceUnavailableException(
-        "Checkout creation is uncertain; reconcile it before trying another charge"
+        "No se pudo confirmar la creación del pago; debe conciliarlo antes de intentar otro cobro"
       );
     }
     await this.db.query(
@@ -101,7 +104,7 @@ export class SqlMembershipBilling extends MembershipBilling {
       type: QueryTypes.SELECT
     });
     if (state.cancelRequestedAt || state.suspendedAt)
-      throw new ConflictException("Membership was stopped while checkout was being created");
+      throw new ConflictException("La membresía se detuvo mientras se creaba la solicitud de pago");
     return checkout;
   }
   /**

@@ -1,5 +1,6 @@
+import { ApiValidationPipe } from "../../shared/presentation/api-validation.pipe";
 import { userFixture } from "../helpers/identity.fixture";
-import { AuthUseCase } from "../../modules/auth/application/auth.usecase";
+import { AuthUseCase } from "../helpers/usecases/AuthUseCase";
 import testUsersSeeder from "../../../database/seeders/202610280001-test-users";
 import { createSuperUser } from "../../../scripts/lib/super-user";
 import { compare } from "bcryptjs";
@@ -11,11 +12,11 @@ const operator = { ...userFixture().toView(), roles: ["superadmin"], permissions
 import { QueryTypes } from "sequelize";
 import { AppModule } from "../../app.module";
 import { Test } from "@nestjs/testing";
-import { ValidationPipe, type INestApplication } from "@nestjs/common";
+import { type INestApplication } from "@nestjs/common";
 import request from "supertest";
 
 import { AccountMailer } from "../../modules/auth/domain/account-actions.repository";
-import { UsersUseCase } from "../../modules/identity/application/users.usecase";
+import { UsersUseCase } from "../helpers/usecases/UsersUseCase";
 import { Sequelize } from "sequelize-typescript";
 describe("Blue Dent with PostgreSQL", () => {
   let app: INestApplication;
@@ -37,7 +38,7 @@ describe("Blue Dent with PostgreSQL", () => {
     app = module.createNestApplication();
     app.setGlobalPrefix("api/v1");
     app.useGlobalPipes(
-      new ValidationPipe({
+      new ApiValidationPipe({
         whitelist: true,
         forbidNonWhitelisted: true,
         transform: true
@@ -145,7 +146,13 @@ describe("Blue Dent with PostgreSQL", () => {
     await request(app.getHttpServer())
       .post("/api/v1/auth/invitations")
       .auth(token, { type: "bearer" })
-      .send({ email: "invite@blue.test", firstName: "Invited", lastName: "Customer", roles: ["customer"] })
+      .send({
+        clinicAssignments: [],
+        email: "invite@blue.test",
+        firstName: "Invited",
+        lastName: "Customer",
+        roles: ["customer"]
+      })
       .expect(201);
     const invitation = emails.find(e => e.kind === "invite")!;
     const input = { token: invitation.token, password: "TestPassword123!" };
@@ -211,7 +218,7 @@ describe("Blue Dent with PostgreSQL", () => {
   });
   it("reads current grants and restores default role permissions on sync", async () => {
     const db = app.get(Sequelize);
-    const login = await app.get(AuthUseCase).login("invite@blue.test", "TestPassword123!");
+    const login = await AuthUseCase.resolve(app).login("invite@blue.test", "TestPassword123!");
     await request(app.getHttpServer()).get("/api/v1/auth/me").auth(login.token, { type: "bearer" }).expect(200);
     await db.query(
       'DELETE FROM role_permissions rp USING roles r WHERE rp."roleId" = r.id AND r.name = :name AND rp."permissionCode" = :code',
@@ -240,10 +247,10 @@ describe("Blue Dent with PostgreSQL", () => {
       .expect(200);
     expect(login.body.user.roles).toEqual(["superadmin"]);
     expect(login.body.user.verified).toBe(true);
-    expect(login.body.user.permissions.sort()).toEqual([...PERMISSIONS].sort());
+    expect(login.body.user.globalPermissions.sort()).toEqual([...PERMISSIONS].sort());
   });
   it("persists role assignments and derives grants again after a user update", async () => {
-    const users = app.get(UsersUseCase);
+    const users = UsersUseCase.resolve(app);
     const user = await users.create(
       {
         email: "role-update@blue.test",
@@ -290,7 +297,7 @@ describe("Blue Dent with PostgreSQL", () => {
   });
   it("seeds one verified user per role with the requested password, without duplicates", async () => {
     const db = app.get(Sequelize);
-    const originalTotal = (await app.get(UsersUseCase).list({ limit: 100, offset: 0 }, operator)).total;
+    const originalTotal = (await UsersUseCase.resolve(app).list({ limit: 100, offset: 0 }, operator)).total;
     await testUsersSeeder.up(db.getQueryInterface());
     await testUsersSeeder.up(db.getQueryInterface());
     const rows = await db.query<{
@@ -302,7 +309,7 @@ describe("Blue Dent with PostgreSQL", () => {
     }>(
       `SELECT u.email,u.verified,u.enabled,u."passwordHash",r.name AS role
        FROM users u JOIN user_roles ur ON ur."userId"=u.id
-       JOIN roles r ON r.id=ur."roleId" WHERE u.email IN (:emails) ORDER BY u.email`,
+       JOIN roles r ON r.id=ur."roleId" WHERE ur."clinicId" IS NULL AND u.email IN (:emails) ORDER BY u.email`,
       {
         replacements: { emails: ["superadmin@blue-dent.test", "admin@blue-dent.test", "customer@blue-dent.test"] },
         type: QueryTypes.SELECT
@@ -315,22 +322,47 @@ describe("Blue Dent with PostgreSQL", () => {
       expect(row.verified).toBe(true);
       expect(row.enabled).toBe(true);
       expect(await compare("Pa$$word123", row.passwordHash)).toBe(true);
-      const login = await app.get(AuthUseCase).login(row.email, "Pa$$word123");
-      expect(login.user.roles).toEqual([row.role]);
-      expect(login.user.permissions.sort()).toEqual(
+      const login = await AuthUseCase.resolve(app).login(row.email, "Pa$$word123");
+      expect(login.user.globalRoles).toEqual([row.role]);
+      if (row.role === "customer") {
+        expect(login.user.mode).toBe("patient");
+        expect(login.user.clinics).toEqual([]);
+      } else {
+        expect(login.user.mode).toBe("staff");
+        expect(login.user.clinics).toEqual([
+          expect.objectContaining({
+            id: "00000000-0000-4000-8000-000000000101",
+            name: "Clínica Blue Care de prueba",
+            roles: ["admin"]
+          })
+        ]);
+        const selected = await AuthUseCase.resolve(app).login(row.email, "Pa$$word123", login.user.clinics[0].id);
+        expect(selected.user.clinicId).toBe(login.user.clinics[0].id);
+      }
+      expect(login.user.globalPermissions.sort()).toEqual(
         row.role === "superadmin"
           ? [...PERMISSIONS].sort()
           : [...DEFAULT_ROLE_PERMISSIONS[row.role as "admin" | "customer"].permissions].sort()
       );
     }
+    const [seeded] = await db.query<{ staff: number; profiles: number; roles: number }>(
+      `SELECT (SELECT COUNT(*)::int FROM clinic_staff WHERE "clinicId"=:id) AS staff,
+       (SELECT COUNT(*)::int FROM staff_profiles WHERE "userId" IN ('00000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000002','00000000-0000-4000-8000-000000000003')) AS profiles,
+       (SELECT COUNT(*)::int FROM user_roles WHERE "clinicId"=:id) AS roles`,
+      { replacements: { id: "00000000-0000-4000-8000-000000000101" }, type: QueryTypes.SELECT }
+    );
+    expect(seeded).toEqual({ staff: 2, profiles: 2, roles: 2 });
     await testUsersSeeder.down(db.getQueryInterface());
+    expect(await db.query("SELECT id FROM clinics WHERE code='blue-care-test'", { type: QueryTypes.SELECT })).toEqual(
+      []
+    );
     const remaining = await db.query<{ count: number }>(
       "SELECT COUNT(*)::int AS count FROM users WHERE email IN (:emails)",
       { replacements: { emails: rows.map(row => row.email) }, type: QueryTypes.SELECT }
     );
     expect(remaining[0].count).toBe(0);
-    expect((await app.get(UsersUseCase).list({ limit: 100, offset: 0 }, operator)).total).toBe(originalTotal);
-    const collision = await app.get(UsersUseCase).create(
+    expect((await UsersUseCase.resolve(app).list({ limit: 100, offset: 0 }, operator)).total).toBe(originalTotal);
+    const collision = await UsersUseCase.resolve(app).create(
       {
         email: "customer@blue-dent.test",
         firstName: "Existing",
@@ -341,17 +373,81 @@ describe("Blue Dent with PostgreSQL", () => {
       operator
     );
     await expect(testUsersSeeder.up(db.getQueryInterface())).rejects.toThrow("conflicts with an existing account");
-    expect((await app.get(UsersUseCase).read(collision.id, operator)).roles).toEqual(["admin"]);
-    expect((await app.get(UsersUseCase).list({ limit: 100, offset: 0 }, operator)).total).toBe(originalTotal + 1);
-    await app.get(UsersUseCase).delete(collision.id, operator);
+    expect((await UsersUseCase.resolve(app).read(collision.id, operator)).roles).toEqual(["admin"]);
+    expect((await UsersUseCase.resolve(app).list({ limit: 100, offset: 0 }, operator)).total).toBe(originalTotal + 1);
+    await UsersUseCase.resolve(app).delete(collision.id, operator);
+  }, 15000);
+  it("rejects a reserved clinic collision without overwriting the clinic or creating test accounts", async () => {
+    const db = app.get(Sequelize),
+      id = "00000000-0000-4000-8000-000000000102";
+    await db.query(
+      "INSERT INTO clinics(id,code,name,enabled,\"createdAt\",\"updatedAt\") VALUES (:id,'blue-care-test','Existing clinic',true,NOW(),NOW())",
+      { replacements: { id } }
+    );
+    try {
+      await expect(testUsersSeeder.up(db.getQueryInterface())).rejects.toThrow("Test clinic conflicts");
+      expect(
+        await db.query("SELECT id,name FROM clinics WHERE code='blue-care-test'", { type: QueryTypes.SELECT })
+      ).toEqual([{ id, name: "Existing clinic" }]);
+      expect(
+        await db.query("SELECT id FROM users WHERE id='00000000-0000-4000-8000-000000000001'", {
+          type: QueryTypes.SELECT
+        })
+      ).toEqual([]);
+    } finally {
+      await db.query("DELETE FROM clinics WHERE id=:id", { replacements: { id } });
+    }
+  });
+  it("preserves clinic assignments on reseed and keeps a clinic used by another account on undo", async () => {
+    const db = app.get(Sequelize),
+      clinicId = "00000000-0000-4000-8000-000000000101",
+      otherClinicId = "00000000-0000-4000-8000-000000000103",
+      seedUser = "00000000-0000-4000-8000-000000000002";
+    await testUsersSeeder.up(db.getQueryInterface());
+    await db.query(
+      "INSERT INTO clinics(id,code,name,enabled,\"createdAt\",\"updatedAt\") VALUES (:id,'seed-extra-test','Other clinic',true,NOW(),NOW())",
+      { replacements: { id: otherClinicId } }
+    );
+    await db.query(
+      `INSERT INTO clinic_staff("clinicId","userId","createdAt") VALUES (:clinicId,:userId,NOW());
+      INSERT INTO user_roles("userId","roleId","clinicId") SELECT :userId,id,:clinicId FROM roles WHERE name='admin'`,
+      { replacements: { clinicId: otherClinicId, userId: seedUser } }
+    );
+    await testUsersSeeder.up(db.getQueryInterface());
+    expect(
+      await db.query('SELECT "userId" FROM user_roles WHERE "userId"=:userId AND "clinicId"=:clinicId', {
+        replacements: { userId: seedUser, clinicId: otherClinicId },
+        type: QueryTypes.SELECT
+      })
+    ).toEqual([{ userId: seedUser }]);
+    await db.query(
+      'INSERT INTO clinic_staff("clinicId","userId","createdAt") SELECT :clinicId,id,NOW() FROM users WHERE email=\'admin@blue.test\'',
+      { replacements: { clinicId } }
+    );
+    await testUsersSeeder.down(db.getQueryInterface());
+    expect(
+      await db.query("SELECT id FROM clinics WHERE id=:clinicId", {
+        replacements: { clinicId },
+        type: QueryTypes.SELECT
+      })
+    ).toEqual([{ id: clinicId }]);
+    await db.query('DELETE FROM clinic_staff WHERE "clinicId"=:clinicId', { replacements: { clinicId } });
+    await testUsersSeeder.down(db.getQueryInterface());
+    await db.query("DELETE FROM clinics WHERE id=:id", { replacements: { id: otherClinicId } });
   }, 15000);
   it("manages invitation previews, metadata, resends, expiration, acceptance and revocation", async () => {
     const db = app.get(Sequelize);
-    const admin = await app.get(AuthUseCase).login("admin@blue.test", "NewPassword456!");
+    const admin = await AuthUseCase.resolve(app).login("admin@blue.test", "NewPassword456!");
     const create = await request(app.getHttpServer())
       .post("/api/v1/auth/invitations")
       .auth(admin.token, { type: "bearer" })
-      .send({ email: "lifecycle@blue.test", firstName: "Ana", lastName: "López", roles: ["customer"] })
+      .send({
+        clinicAssignments: [],
+        email: "lifecycle@blue.test",
+        firstName: "Ana",
+        lastName: "López",
+        roles: ["customer"]
+      })
       .expect(201);
     expect(create.body).toMatchObject({
       firstName: "Ana",
@@ -419,7 +515,13 @@ describe("Blue Dent with PostgreSQL", () => {
     const second = await request(app.getHttpServer())
       .post("/api/v1/auth/invitations")
       .auth(admin.token, { type: "bearer" })
-      .send({ email: "revoked@blue.test", firstName: "Eva", lastName: "Prueba", roles: ["customer"] })
+      .send({
+        clinicAssignments: [],
+        email: "revoked@blue.test",
+        firstName: "Eva",
+        lastName: "Prueba",
+        roles: ["customer"]
+      })
       .expect(201);
     const revoked = emails
       .filter(email => email.kind === "invite" && email.email === "revoked@blue.test")
@@ -434,8 +536,8 @@ describe("Blue Dent with PostgreSQL", () => {
       .expect(410);
   }, 15000);
   it("activates a registered customer, isolates account ownership and verifies channel changes", async () => {
-    const users = app.get(UsersUseCase);
-    const auth = app.get(AuthUseCase);
+    const users = UsersUseCase.resolve(app);
+    const auth = AuthUseCase.resolve(app);
     const account = await users.create(
       {
         email: "activation@blue.test",
@@ -517,7 +619,7 @@ describe("Blue Dent with PostgreSQL", () => {
     await request(app.getHttpServer()).post("/api/v1/auth/email/confirm").send({ token: emailToken }).expect(400);
   }, 15000);
   it("allows only one recovery when two issued reset links are redeemed concurrently", async () => {
-    const auth = app.get(AuthUseCase);
+    const auth = AuthUseCase.resolve(app);
     const old = await auth.login("lifecycle@blue.test", "Abcd123!");
     await request(app.getHttpServer())
       .post("/api/v1/auth/password/forgot")
@@ -542,7 +644,7 @@ describe("Blue Dent with PostgreSQL", () => {
     expect((await auth.login("lifecycle@blue.test", passwords[winner])).user.id).toBe(old.user.id);
   }, 15000);
   it("verifies a pre-registered staff identity without creating another account", async () => {
-    const users = app.get(UsersUseCase);
+    const users = UsersUseCase.resolve(app);
     const account = await users.create(
       {
         email: "registered-admin@blue.test",

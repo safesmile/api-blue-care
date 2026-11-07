@@ -7,8 +7,8 @@ import { JobScheduler, type RecurringJob } from "../../shared/domain/job-schedul
 export class GoogleJobScheduler extends JobScheduler {
   private readonly client = new CloudSchedulerClient();
   /**
-   *
-   * @param config Validated application settings.
+   * Recibe las dependencias de la operación.
+   * @param config Dependencia tipada de config.
    */
   constructor(private readonly config: ConfigService) {
     super();

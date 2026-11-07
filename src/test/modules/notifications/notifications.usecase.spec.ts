@@ -1,5 +1,5 @@
 import { ConfigService } from "@nestjs/config";
-import { NotificationsUseCase } from "../../../modules/notifications/application/notifications.usecase";
+import { NotificationsUseCase } from "../../helpers/usecases/NotificationsUseCase";
 describe("NotificationsUseCase", () => {
   const repository = {
     create: jest.fn(),
@@ -53,7 +53,7 @@ describe("NotificationsUseCase", () => {
     expect(repository.list).toHaveBeenCalledWith("owner", 25, 0);
     repository.markRead.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
     await service.markRead("owner", "id");
-    await expect(service.markRead("owner", "other")).rejects.toThrow("Notification not found");
+    await expect(service.markRead("owner", "other")).rejects.toThrow("No se encontró la notificación");
     await service.cancel("owner", "event");
     expect(repository.cancel).toHaveBeenCalledWith("owner", "event");
   });

@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException, NotFoundException } from "@nestjs/common";
-import { PatientsUseCase } from "../../../modules/patients/application/patients.usecase";
+import { PatientsUseCase } from "../../helpers/usecases/PatientsUseCase";
 import { REGISTERED_PERMISSIONS } from "../../../modules/authorization/infrastructure/permission-registry";
 import { userFixture } from "../../helpers/identity.fixture";
 describe("PatientsUseCase", () => {

@@ -1,42 +1,43 @@
+import { PermissionCode } from "../../../shared/domain/permission-code";
 export const IDENTITY_PERMISSION_DEFINITIONS = [
   {
-    shortcode: "roles:assign",
+    shortcode: PermissionCode.RolesAssign,
     scope: "identity.roles.assign",
     group: "Users",
     description: "Assign roles to users and invitations"
   },
   {
-    shortcode: "users:create",
+    shortcode: PermissionCode.UsersCreate,
     scope: "identity.users.create",
     group: "Users",
     description: "Create users and assign roles"
   },
   {
-    shortcode: "users:read",
+    shortcode: PermissionCode.UsersRead,
     scope: "identity.users.read",
     group: "Users",
     description: "Read a user"
   },
   {
-    shortcode: "users:list",
+    shortcode: PermissionCode.UsersList,
     scope: "identity.users.list",
     group: "Users",
     description: "List users"
   },
   {
-    shortcode: "users:update",
+    shortcode: PermissionCode.UsersUpdate,
     scope: "identity.users.update",
     group: "Users",
     description: "Update users and their roles"
   },
   {
-    shortcode: "users:delete",
+    shortcode: PermissionCode.UsersDelete,
     scope: "identity.users.delete",
     group: "Users",
     description: "Delete users"
   },
   {
-    shortcode: "users:manage",
+    shortcode: PermissionCode.UsersManage,
     scope: "identity.users.manage",
     group: "Users",
     description: "Operate across user identities in addition to operation permissions"

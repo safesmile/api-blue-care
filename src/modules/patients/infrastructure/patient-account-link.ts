@@ -29,15 +29,15 @@ export async function linkPatientAccount(
     { replacements: { userId }, transaction, type: QueryTypes.SELECT }
   );
   if (!before?.enabled || !user?.enabled || !user.verified || !before.email || before.email !== user.email)
-    throw new ConflictException("Patient and verified account must share the registered email");
+    throw new ConflictException("El paciente y la cuenta verificada deben tener el mismo correo registrado");
   if (before.userId === userId) return before;
-  if (before.userId) throw new ConflictException("Patient already linked to another account");
+  if (before.userId) throw new ConflictException("El paciente ya está vinculado a otra cuenta");
   const [duplicate] = await db.query<{ id: string }>('SELECT id FROM patients WHERE "userId"=:userId', {
     replacements: { userId },
     transaction,
     type: QueryTypes.SELECT
   });
-  if (duplicate) throw new ConflictException("Account already linked to a patient");
+  if (duplicate) throw new ConflictException("La cuenta ya está vinculada a un paciente");
   const [after] = await db.query<PatientView>(
     'UPDATE patients SET "userId"=:userId,"updatedAt"=NOW() WHERE id=:id RETURNING *',
     { replacements: { id, userId }, transaction, type: QueryTypes.SELECT }

@@ -1,36 +1,37 @@
+import { PermissionCode } from "../../../shared/domain/permission-code";
 export const PATIENTS_PERMISSION_DEFINITIONS = [
   {
-    shortcode: "patients:create",
+    shortcode: PermissionCode.PatientsCreate,
     scope: "patients.create",
     group: "Patients",
     description: "Register patients in accessible active clinics"
   },
   {
-    shortcode: "patients:read",
+    shortcode: PermissionCode.PatientsRead,
     scope: "patients.read",
     group: "Patients",
     description: "Read administrative patient records within clinic scope"
   },
   {
-    shortcode: "patients:list",
+    shortcode: PermissionCode.PatientsList,
     scope: "patients.list",
     group: "Patients",
     description: "Search patient records within clinic scope"
   },
   {
-    shortcode: "patients:update",
+    shortcode: PermissionCode.PatientsUpdate,
     scope: "patients.update",
     group: "Patients",
     description: "Edit or deactivate patient records within clinic scope"
   },
   {
-    shortcode: "patients:link",
+    shortcode: PermissionCode.PatientsLink,
     scope: "patients.link",
     group: "Patients",
     description: "Link patients to verified matching accounts within clinic scope"
   },
   {
-    shortcode: "patients:self",
+    shortcode: PermissionCode.PatientsSelf,
     scope: "patients.self",
     group: "Patients",
     description: "Read and complete the patient profile linked to your own account"

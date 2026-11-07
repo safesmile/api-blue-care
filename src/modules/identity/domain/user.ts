@@ -27,3 +27,7 @@ export class User extends Entity<UserProps> {
   }
 }
 export type UserView = ReturnType<User["toView"]>;
+
+export interface CollaboratorView extends Omit<UserView, "permissions"> {
+  clinics: { id: string; name: string; roles: string[] }[];
+}

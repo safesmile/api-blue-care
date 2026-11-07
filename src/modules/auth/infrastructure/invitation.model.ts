@@ -1,3 +1,4 @@
+import type { ClinicRoleAssignment } from "../../authorization/domain/clinic-context.repository";
 import { Column, DataType, Model, PrimaryKey, Table } from "sequelize-typescript";
 import type { InvitationProps, InvitationStatus } from "../domain/invitation.entity";
 /**
@@ -5,8 +6,13 @@ import type { InvitationProps, InvitationStatus } from "../domain/invitation.ent
  */
 @Table({ tableName: "invitations", timestamps: false })
 export class InvitationModel extends Model implements InvitationProps {
+  @Column({ type: DataType.BOOLEAN, allowNull: false, defaultValue: false }) declare staff: boolean;
+  @Column({ type: DataType.STRING(20), allowNull: false, defaultValue: "general" }) declare kind:
+    "general" | "patient" | "collaborator";
   @PrimaryKey @Column(DataType.UUID) declare id: string;
   @Column(DataType.UUID) declare patientId: string | null;
+  @Column({ type: DataType.JSONB, allowNull: false, defaultValue: [] })
+  declare clinicAssignments: ClinicRoleAssignment[];
   @Column(DataType.STRING(254)) declare email: string;
   @Column(DataType.STRING(60)) declare firstName: string;
   @Column(DataType.STRING(60)) declare lastName: string;

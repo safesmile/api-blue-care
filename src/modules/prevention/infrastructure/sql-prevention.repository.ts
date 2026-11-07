@@ -1,3 +1,4 @@
+import { clinicScopeParams } from "../../clinics/infrastructure/clinic-scope";
 import { auditSnapshot } from "../../audit/domain/audit-snapshot";
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import { Sequelize } from "sequelize-typescript";
@@ -20,15 +21,15 @@ import { recordChange } from "../../audit/infrastructure/record-change";
 import { persistNotification } from "../../notifications/infrastructure/persist-notification";
 import { nextPreventiveDate } from "../domain/prevention-calendar";
 const EVENT_SCOPE = `(:own AND p."userId"=:actorId OR NOT :own AND ${PATIENT_SCOPE_SQL}
- AND (:all OR EXISTS(SELECT 1 FROM clinic_staff s WHERE s."clinicId"=e."clinicId" AND s."userId"=:actorId)))`;
+ AND blue_care_clinic_allowed(:actorId,e."clinicId",CAST(:currentClinicId AS UUID),CAST(:clinicPermission AS TEXT)))`;
 const SELECT = 'SELECT e.* FROM preventive_events e JOIN patients p ON p.id=e."patientId"';
 /** Tracks preventive evidence and generates notifications atomically under patient/event locks. */
 @Injectable()
 export class SqlPreventionRepository extends PreventionRepository {
   /**
-   * Receives the explicit persistence and transport dependencies.
-   * @param db PostgreSQL connection.
-   * @param clinics Explicit clinics value for this operation.
+   * Recibe las dependencias de la operación.
+   * @param db Dependencia tipada de db.
+   * @param clinics Dependencia tipada de clinics.
    */
   constructor(
     private readonly db: Sequelize,
@@ -68,8 +69,8 @@ export class SqlPreventionRepository extends PreventionRepository {
               type: QueryTypes.SELECT
             })
           : [];
-        if (id && !before) throw new NotFoundException("Preventive type not found");
-        if (before && before.code !== input.code) throw new ConflictException("Type code is immutable");
+        if (id && !before) throw new NotFoundException("No se encontró el tipo de prevención");
+        if (before && before.code !== input.code) throw new ConflictException("El código del tipo no se puede cambiar");
         const key = id ?? randomUUID();
         const [after] = await this.db.query<PreventionType>(
           id
@@ -114,7 +115,8 @@ export class SqlPreventionRepository extends PreventionRepository {
             existing.intervalMonths === input.intervalMonths &&
             JSON.stringify(existing.reminderHours) === JSON.stringify(input.reminderHours) &&
             existing.externalReference === (input.externalReference ?? null);
-          if (!same) throw new ConflictException("Operation key reused with different or changed event");
+          if (!same)
+            throw new ConflictException("La clave de operación ya se utilizó con un evento diferente o modificado");
           return existing;
         }
         return this.insert(input, actor.id, transaction);
@@ -183,7 +185,8 @@ export class SqlPreventionRepository extends PreventionRepository {
         const before = await this.lock(id, input.expectedVersion, actor, transaction);
         await this.clinics.require(before.clinicId, actor, transaction, true);
         const now = await this.now(transaction);
-        if (new Date(input.dueAt) <= now) throw new BadRequestException("Future due date required for rescheduling");
+        if (new Date(input.dueAt) <= now)
+          throw new BadRequestException("Para reprogramar se requiere una fecha futura");
         await this.invalidate(id, transaction);
         const [after] = await this.db.query<PreventionEvent>(
           `UPDATE preventive_events SET "dueAt"=:dueAt,status=:status,"intervalMonths"=:intervalMonths,
@@ -220,7 +223,7 @@ export class SqlPreventionRepository extends PreventionRepository {
         const before = await this.lock(id, expectedVersion, actor, transaction);
         const now = await this.now(transaction),
           completedAt = new Date(occurredAt);
-        if (completedAt > now) throw new BadRequestException("Completion cannot be in the future");
+        if (completedAt > now) throw new BadRequestException("La fecha de realización no puede estar en el futuro");
         await this.invalidate(id, transaction);
         const [event] = await this.db.query<PreventionEvent>(
           'UPDATE preventive_events SET status=\'completed\',"completedAt"=:completedAt,version=version+1,"updatedAt"=:now WHERE id=:id RETURNING *',
@@ -366,7 +369,7 @@ export class SqlPreventionRepository extends PreventionRepository {
    * @returns The authorized result or completion of the operation.
    */
   private scope(actor: AccessActor, own: boolean) {
-    return { actorId: actor.id, own, all: actor.permissions.includes("clinics:all") };
+    return { own, ...clinicScopeParams(actor) };
   }
   /**
    * Locks and authorizes the active patient.
@@ -380,9 +383,9 @@ export class SqlPreventionRepository extends PreventionRepository {
       "SELECT enabled FROM patients WHERE id=:id FOR UPDATE",
       { replacements: { id }, transaction, type: QueryTypes.SELECT }
     );
-    if (!patient) throw new NotFoundException("Patient not found");
+    if (!patient) throw new NotFoundException("No se encontró el paciente");
     await requirePatientScope(this.db, transaction, id, actor);
-    if (!patient.enabled) throw new ConflictException("Patient is inactive");
+    if (!patient.enabled) throw new ConflictException("El paciente está inactivo");
   }
   /**
    * Locks the current open event and checks its expected version.
@@ -397,7 +400,7 @@ export class SqlPreventionRepository extends PreventionRepository {
       'SELECT "patientId" FROM preventive_events WHERE id=:id',
       { replacements: { id }, transaction, type: QueryTypes.SELECT }
     );
-    if (!hint) throw new NotFoundException("Preventive event not found");
+    if (!hint) throw new NotFoundException("No se encontró el evento preventivo");
     await this.patient(hint.patientId, actor, transaction);
     const [event] = await this.db.query<PreventionEvent>("SELECT * FROM preventive_events WHERE id=:id FOR UPDATE", {
       replacements: { id },
@@ -406,7 +409,7 @@ export class SqlPreventionRepository extends PreventionRepository {
     });
     await this.clinics.require(event.clinicId, actor, transaction);
     if (event.version !== expectedVersion || !["planned", "scheduled"].includes(event.status))
-      throw new ConflictException("Event changed or already closed; reload its current version");
+      throw new ConflictException("El evento cambió o ya está cerrado; cargue su versión actual");
     return event;
   }
   /**
@@ -428,10 +431,10 @@ export class SqlPreventionRepository extends PreventionRepository {
       transaction,
       type: QueryTypes.SELECT
     });
-    if (!type?.enabled) throw new ConflictException("Preventive type is unavailable");
+    if (!type?.enabled) throw new ConflictException("El tipo de prevención no está disponible");
     const now = await this.now(transaction);
     if (!followUpOfId && new Date(input.dueAt) <= now)
-      throw new BadRequestException("New events require a future due date");
+      throw new BadRequestException("Los eventos nuevos requieren una fecha futura");
     const [event] = await this.db.query<PreventionEvent>(
       `INSERT INTO preventive_events
       (id,"patientId","clinicId","typeId","typeName","dueAt",status,"intervalMonths","reminderHours","externalReference","followUpOfId","idempotencyKey","createdAt","updatedAt")
@@ -563,7 +566,7 @@ export class SqlPreventionRepository extends PreventionRepository {
       return await operation();
     } catch (error) {
       if (error instanceof UniqueConstraintError)
-        throw new ConflictException("Duplicate preventive reference or operation");
+        throw new ConflictException("La referencia preventiva o la operación ya existen");
       if (error instanceof DatabaseError) throw new Error("Preventive persistence failed; transaction rolled back");
       throw error;
     }

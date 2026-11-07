@@ -10,8 +10,8 @@ import { FileStorage } from "./file-storage";
 export class GcsFileStorage extends FileStorage {
   private readonly storage = new Storage();
   /**
-   * Receives the dependencies required by this component.
-   * @param config Validated application configuration.
+   * Recibe las dependencias de la operación.
+   * @param config Dependencia tipada de config.
    */
   constructor(private readonly config: ConfigService) {
     super();
@@ -22,9 +22,9 @@ export class GcsFileStorage extends FileStorage {
    * @returns Result of the completed operation.
    */
   private file(key: string) {
-    if (!/^blue-dent\/[0-9a-f-]{36}$/.test(key)) throw new BadRequestException("Invalid object key");
+    if (!/^blue-dent\/[0-9a-f-]{36}$/.test(key)) throw new BadRequestException("La clave del archivo no es válida");
     const bucket = this.config.get<string>("GCS_PRIVATE_BUCKET");
-    if (!bucket) throw new ServiceUnavailableException("File storage is not configured");
+    if (!bucket) throw new ServiceUnavailableException("El almacenamiento de archivos no está configurado");
     return this.storage.bucket(bucket).file(key);
   }
   /**
@@ -35,7 +35,7 @@ export class GcsFileStorage extends FileStorage {
    */
   async upload(data: Buffer, contentType: string) {
     if (!["image/jpeg", "image/png", "application/pdf"].includes(contentType) || data.length > 10 * 1024 * 1024)
-      throw new BadRequestException("Unsupported file or size exceeds 10 MB");
+      throw new BadRequestException("El archivo no está permitido o supera el límite de 10 MB");
     const key = "blue-dent/" + randomUUID();
     await this.file(key).save(data, {
       resumable: false,

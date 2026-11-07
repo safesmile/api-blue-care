@@ -25,12 +25,18 @@ export = {
         {
           id: { type: S.UUID, primaryKey: true },
           userId: { type: S.UUID, allowNull: false, references: { model: "users", key: "id" }, onDelete: "CASCADE" },
+          clinicId: { type: S.UUID, allowNull: true },
+          mode: { type: S.STRING(10), allowNull: false, defaultValue: "staff" },
           tokenHash: { type: S.STRING(64), unique: true, allowNull: false },
           expiresAt: { type: S.DATE, allowNull: false },
           absoluteExpiresAt: { type: S.DATE, allowNull: false },
           revoked: { type: S.BOOLEAN, allowNull: false },
           ...timestamps
         },
+        { transaction }
+      );
+      await q.sequelize.query(
+        "ALTER TABLE sessions ADD CONSTRAINT sessions_mode_check CHECK (mode IN ('patient','staff') AND (mode <> 'patient' OR \"clinicId\" IS NULL))",
         { transaction }
       );
       await q.addIndex("sessions", ["userId"], { transaction });
