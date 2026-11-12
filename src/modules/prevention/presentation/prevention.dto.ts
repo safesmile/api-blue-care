@@ -1,3 +1,4 @@
+import { ListQueryDto } from "../../../shared/presentation/list-query.dto";
 import { Transform } from "class-transformer";
 import {
   ArrayMaxSize,
@@ -16,7 +17,6 @@ import {
   ValidateIf
 } from "class-validator";
 import { AuditReasonDto } from "../../../shared/presentation/audit-reason.dto";
-import { PaginationDto } from "../../identity/presentation/user.dto";
 import type { PreventionStatus } from "../domain/prevention.repository";
 /**
  * Defines the validated prevention, dashboard or notification contract.
@@ -75,7 +75,7 @@ export class CompletePreventiveEventDto extends EventVersionDto {
 /**
  * Defines the validated prevention, dashboard or notification contract.
  */
-export class PreventionQueryDto extends PaginationDto {
+export class PreventionQueryDto extends ListQueryDto {
   @ValidateIf((_o, v) => v !== undefined) @IsUUID() patientId?: string;
   @ValidateIf((_o, v) => v !== undefined) @IsUUID() clinicId?: string;
   @ValidateIf((_o, v) => v !== undefined) @IsUUID() typeId?: string;

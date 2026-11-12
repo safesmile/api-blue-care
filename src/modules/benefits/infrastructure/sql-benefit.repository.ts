@@ -1,6 +1,7 @@
+import { sqlListQuery } from "../../../shared/infrastructure/sql-list-query";
 import { ConflictException, Injectable, NotFoundException, BadRequestException } from "@nestjs/common";
 import { Sequelize } from "sequelize-typescript";
-import { QueryTypes, UniqueConstraintError } from "sequelize";
+import { QueryTypes, UniqueConstraintError, type Transaction } from "sequelize";
 import { randomUUID } from "node:crypto";
 import {
   BenefitRepository,
@@ -14,8 +15,14 @@ import type { AccessActor } from "../../authorization/domain/access-policy";
 import type { Pagination } from "../../../shared/domain/crud.repository";
 import { recordChange } from "../../audit/infrastructure/record-change";
 import { auditSnapshot } from "../../audit/domain/audit-snapshot";
-const SELECT_BENEFIT =
-  'SELECT b.*,TO_JSONB(v) AS "currentVersion" FROM benefit_definitions b LEFT JOIN benefit_versions v ON v.id=b."currentVersionId"';
+const BENEFIT_CATALOG = ` FROM benefit_definitions b LEFT JOIN benefit_versions v ON v.id=b."currentVersionId"
+  LEFT JOIN LATERAL (
+    SELECT * FROM benefit_versions candidate
+    WHERE candidate."benefitId"=b.id AND candidate."publishedAt" IS NULL
+      AND candidate.number>COALESCE(v.number,0)
+    ORDER BY candidate.number DESC LIMIT 1
+  ) draft ON TRUE`;
+const SELECT_BENEFIT = 'SELECT b.*,TO_JSONB(v) AS "currentVersion",TO_JSONB(draft) AS "latestDraft"' + BENEFIT_CATALOG;
 /** Keeps quota identity stable while publishing immutable rule revisions. */
 @Injectable()
 export class SqlBenefitRepository extends BenefitRepository {
@@ -36,27 +43,37 @@ export class SqlBenefitRepository extends BenefitRepository {
     const id = randomUUID();
     try {
       await this.db.transaction(async transaction => {
-        const [plan] = await this.db.query<{ id: string }>("SELECT id FROM plans WHERE id=:planId FOR SHARE", {
-          replacements: { planId: input.planId },
-          transaction,
-          type: QueryTypes.SELECT
-        });
-        if (!plan) throw new NotFoundException("No se encontró el plan");
+        const { initialVersion, ...definition } = input;
+        const planId = definition.planId ?? null;
+        const replacements = { ...definition, id, planId };
+        if (planId) {
+          const [plan] = await this.db.query("SELECT id FROM plans WHERE id=:planId FOR SHARE", {
+            replacements,
+            transaction,
+            type: QueryTypes.SELECT
+          });
+          if (!plan) throw new NotFoundException("No se encontró el plan");
+        }
         await this.db.query(
           'INSERT INTO benefit_definitions (id,"planId",code,kind,period,audience,"createdAt") VALUES (:id,:planId,:code,:kind,:period,:audience,NOW())',
-          { replacements: { ...input, id }, transaction }
+          { replacements, transaction }
         );
+        if (planId)
+          await this.db.query('INSERT INTO plan_benefits ("planId","benefitId") VALUES (:planId,:id)', {
+            replacements,
+            transaction
+          });
         await recordChange(this.db, transaction, {
           action: "benefit.created",
           resourceType: "benefit",
           resourceId: id,
           actorId: actor.id,
-          after: { ...input, id }
+          after: { ...definition, id }
         });
+        if (initialVersion) await this.insertVersion(id, definition.kind, 1, initialVersion, actor, transaction);
       });
     } catch (error) {
-      if (error instanceof UniqueConstraintError)
-        throw new ConflictException("El código del beneficio ya existe en este plan");
+      if (error instanceof UniqueConstraintError) throw new ConflictException("El código del beneficio ya existe");
       throw error;
     }
     return (await this.read(id))!;
@@ -79,16 +96,36 @@ export class SqlBenefitRepository extends BenefitRepository {
    * @returns The persisted result or completion of the authorized operation.
    */
   async list(query: BenefitQuery) {
-    const replacements = { ...query, planId: query.planId ?? null },
-      filter = ' WHERE (:planId IS NULL OR b."planId"=:planId)';
+    const listing = sqlListQuery(
+      query,
+      {
+        code: { sql: "b.code", filter: "contains" },
+        search: { sql: "CONCAT_WS(CHR(32),b.code,COALESCE(v.name,draft.name))", filter: "contains" },
+        kind: { sql: "b.kind", filter: "in" },
+        createdAt: { sql: 'b."createdAt"', filter: "dateRange" }
+      },
+      "b.code,b.id",
+      "b.id"
+    );
+    const replacements = {
+      ...query,
+      ...listing.parameters,
+      planId: query.planId ?? null,
+      availableForPlanId: query.availableForPlanId ?? null
+    };
+    const filter =
+      ` WHERE (:planId IS NULL OR EXISTS (
+      SELECT 1 FROM plan_benefits pb WHERE pb."benefitId"=b.id AND pb."planId"=:planId))
+      AND (:availableForPlanId IS NULL OR NOT EXISTS (
+      SELECT 1 FROM plan_benefits pb WHERE pb."benefitId"=b.id AND pb."planId"=:availableForPlanId))` + listing.and;
     const items = await this.db.query<BenefitView>(
-      SELECT_BENEFIT + filter + " ORDER BY b.code,b.id LIMIT :limit OFFSET :offset",
+      SELECT_BENEFIT + filter + " ORDER BY " + listing.order + " LIMIT :limit OFFSET :offset",
       { replacements, type: QueryTypes.SELECT }
     );
-    const [count] = await this.db.query<{ total: number }>(
-      "SELECT COUNT(*)::int total FROM benefit_definitions b" + filter,
-      { replacements, type: QueryTypes.SELECT }
-    );
+    const [count] = await this.db.query<{ total: number }>("SELECT COUNT(*)::int total" + BENEFIT_CATALOG + filter, {
+      replacements,
+      type: QueryTypes.SELECT
+    });
     return { items, total: count.total };
   }
   /**
@@ -106,49 +143,58 @@ export class SqlBenefitRepository extends BenefitRepository {
         type: QueryTypes.SELECT
       });
       if (!benefit) throw new NotFoundException("No se encontró el beneficio");
-      if (
-        (benefit.kind === "discount") !==
-        (input.discountBasisPoints !== undefined && input.discountBasisPoints !== null)
-      )
-        throw new BadRequestException(
-          "Los descuentos requieren puntos básicos; los servicios y artículos deben omitirlos"
-        );
       const [next] = await this.db.query<{ number: number }>(
         'SELECT COALESCE(MAX(number),0)+1 AS number FROM benefit_versions WHERE "benefitId"=:id',
         { replacements: { id }, transaction, type: QueryTypes.SELECT }
       );
-      const [row] = await this.db.query<BenefitVersion>(
-        `INSERT INTO benefit_versions (id,"benefitId",number,name,description,"limitUnits","discountBasisPoints",enabled,"createdAt")
-         VALUES (:versionId,:id,:number,:name,:description,:limitUnits,:discountBasisPoints,:enabled,NOW()) RETURNING *`,
-        {
-          replacements: {
-            ...input,
-            id,
-            versionId: randomUUID(),
-            number: next.number,
-            discountBasisPoints: input.discountBasisPoints ?? null
-          },
-          transaction,
-          type: QueryTypes.SELECT
-        }
-      );
-      await recordChange(this.db, transaction, {
-        action: "benefit.version-created",
-        resourceType: "benefit",
-        resourceId: id,
-        actorId: actor.id,
-        after: auditSnapshot(row, [
-          "id",
-          "number",
-          "name",
-          "description",
-          "limitUnits",
-          "discountBasisPoints",
-          "enabled"
-        ])
-      });
-      return row;
+      return this.insertVersion(id, benefit.kind, next.number, input, actor, transaction);
     });
+  }
+  /**
+   * Persists a draft and its audit event in the caller's transaction.
+   * @param id Benefit identifier.
+   * @param kind Stable benefit type.
+   * @param number Revision number.
+   * @param input Draft values.
+   * @param actor Authenticated operator.
+   * @param transaction Open transaction.
+   * @returns Created revision.
+   */
+  private async insertVersion(
+    id: string,
+    kind: BenefitView["kind"],
+    number: number,
+    input: BenefitVersionInput,
+    actor: AccessActor,
+    transaction: Transaction
+  ) {
+    if ((kind === "discount") !== (input.discountBasisPoints !== undefined && input.discountBasisPoints !== null))
+      throw new BadRequestException(
+        "Los descuentos requieren puntos básicos; los servicios y artículos deben omitirlos"
+      );
+    const [row] = await this.db.query<BenefitVersion>(
+      `INSERT INTO benefit_versions (id,"benefitId",number,name,description,"limitUnits","discountBasisPoints",enabled,"createdAt")
+       VALUES (:versionId,:id,:number,:name,:description,:limitUnits,:discountBasisPoints,:enabled,NOW()) RETURNING *`,
+      {
+        replacements: {
+          ...input,
+          id,
+          versionId: randomUUID(),
+          number,
+          discountBasisPoints: input.discountBasisPoints ?? null
+        },
+        transaction,
+        type: QueryTypes.SELECT
+      }
+    );
+    await recordChange(this.db, transaction, {
+      action: "benefit.version-created",
+      resourceType: "benefit",
+      resourceId: id,
+      actorId: actor.id,
+      after: auditSnapshot(row, ["id", "number", "name", "description", "limitUnits", "discountBasisPoints", "enabled"])
+    });
+    return row;
   }
   /**
    * Lists immutable rule revisions.

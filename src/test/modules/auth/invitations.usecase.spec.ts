@@ -158,17 +158,20 @@ describe("InvitationsUseCase", () => {
       useCase.create({ ...input, firstName: "a".repeat(60), lastName: "b".repeat(60) }, actor)
     ).rejects.toThrow("La longitud total del nombre");
   });
-  it("separates fixed patient onboarding from role delegation and requires a selected clinic", async () => {
+  it("separates fixed patient onboarding from role delegation without requiring a selected clinic", async () => {
     const patientActor = {
       ...actor,
       clinicId: actor.id,
       permissions: ["invitations:create", "patients:link"] as const
     };
-    expect(() => useCase.invitePatient(input, { ...actor, clinicId: null })).toThrow("Seleccione una clínica");
     await expect(useCase.invitePatient(input, { ...actor, clinicId: actor.id })).rejects.toThrow(
       "No tiene permiso para invitar pacientes"
     );
-    const result = await useCase.invitePatient(input, { ...patientActor, permissions: [...patientActor.permissions] });
+    const result = await useCase.invitePatient(input, {
+      ...patientActor,
+      clinicId: null,
+      permissions: [...patientActor.permissions]
+    });
     expect(result).toMatchObject({ kind: "patient", roles: ["customer"], staff: false, clinicAssignments: [] });
     repository.rotate.mockResolvedValue(true);
     await useCase.resend(invitation.id, { ...patientActor, permissions: [...patientActor.permissions] });

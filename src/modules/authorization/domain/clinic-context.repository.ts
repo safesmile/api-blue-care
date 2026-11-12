@@ -1,5 +1,6 @@
 import type { Permission } from "../../../shared/domain/permission";
 import type { UserView } from "../../identity/domain/user";
+import type { ClinicIcon, ClinicColor } from "../../clinics/domain/clinic.repository";
 export interface ClinicRoleAssignment {
   clinicId: string;
   roles: string[];
@@ -7,6 +8,8 @@ export interface ClinicRoleAssignment {
 export interface AccessibleClinic {
   id: string;
   name: string;
+  icon?: ClinicIcon;
+  color?: ClinicColor;
   roles: string[];
   permissions: Permission[];
 }

@@ -5,6 +5,9 @@ export interface Page<T> {
 export interface Pagination {
   limit: number;
   offset: number;
+  sortBy?: string;
+  sortOrder?: "asc" | "desc";
+  filters?: string;
 }
 /**
  * Defines the persistence operations required by the domain.

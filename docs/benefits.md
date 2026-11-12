@@ -4,7 +4,7 @@ Implementación del paso 6 (04/11/2026). Decisiones de producto: business-rules.
 
 ## Configuración y reglas
 
-Cada definición pertenece a un plan y tiene código estable, tipo `discount`, `service` o `item`, destinatario `holder`, `beneficiaries` o `all` y período `monthly`, `annual` o `contract`. Estas dimensiones son inmutables para no reinterpretar consumos anteriores; otra identidad requiere otra definición. Puede deshabilitarse mediante una revisión publicada, sin borrar evidencia.
+Cada definición del catálogo tiene código estable, tipo `discount`, `service` o `item`, destinatario `holder`, `beneficiaries` o `all` y período `monthly`, `annual` o `contract`. Estas dimensiones son inmutables. Una misma definición puede asignarse a varios planes. Quitar una asignación impide nuevos canjes para ese plan y conserva el historial y los consumos registrados.
 
 Las revisiones son inmutables: nombre, descripción, cupo entero (1–100000), habilitado y porcentaje en puntos básicos exclusivamente para descuentos (1500 = 15%). Crear una revisión no la publica. Publicar cambia inmediatamente la regla para miembros nuevos y actuales, conservando el precio contratado. Se descuentan los consumos existentes del mismo período; disponible = máximo(0, límite vigente − unidades consumidas no anuladas). No se vuelve a publicar una revisión histórica retirada. Los detalles comerciales de plans siguen separados de estas reglas cuantificables.
 
@@ -44,7 +44,7 @@ Prefijo general `/api/v1`. Todos requieren sesión y política explícita; las r
 
 | Ruta | Operación / permiso |
 | --- | --- |
-| POST /benefits | Definición, benefits:create |
+| POST /benefits | Definición, `benefits:create`. Si incluye `initialVersion`, exige también `benefits:version` y guarda ambos registros en la misma transacción. |
 | GET /benefits?planId=... | Catálogo paginado, benefits:list |
 | GET /benefits/:id | Definición y revisión actual, benefits:read |
 | POST /benefits/:id/versions | Revisión, benefits:version |

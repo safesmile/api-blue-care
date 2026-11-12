@@ -1,3 +1,4 @@
+import { sqlListQuery } from "../../../shared/infrastructure/sql-list-query";
 import { clinicScopeParams } from "../../clinics/infrastructure/clinic-scope";
 import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import { Sequelize } from "sequelize-typescript";
@@ -19,7 +20,7 @@ import { PATIENT_SCOPE_SQL, requirePatientScope } from "../../patients/infrastru
 import { membershipStatus } from "../domain/membership-state";
 import { recordChange } from "../../audit/infrastructure/record-change";
 import { membershipChange } from "../domain/membership.events";
-const MEMBERSHIP_SELECT = `SELECT m.*, CASE
+const MEMBERSHIP_SELECT = `SELECT m.*, CONCAT(p."firstName",' ',p."lastName") AS "patientName", CASE
  WHEN EXISTS(SELECT 1 FROM recurrente_events e WHERE e."membershipId"=m.id AND e.status='review') OR m."checkoutStatus"='review' THEN 'review'
  WHEN EXISTS(SELECT 1 FROM membership_billing_jobs j WHERE j."membershipId"=m.id AND j.status IN ('pending','processing')) THEN 'pending'
  WHEN m."stoppedAt" IS NOT NULL THEN 'stopped'
@@ -127,15 +128,28 @@ export class SqlMembershipRepository extends MembershipRepository {
    * @returns The persisted result or completion of the authorized operation.
    */
   async list(query: MembershipQuery, actor: AccessActor, own: boolean) {
-    const filter = " WHERE " + ACCESS + ' AND (:patientId IS NULL OR m."patientId"=:patientId)';
+    const listing = sqlListQuery(
+      query,
+      {
+        cadence: { sql: "m.cadence", filter: "in" },
+        patientName: { sql: 'CONCAT(p."firstName",\' \',p."lastName")', filter: "contains" },
+        amountCents: { sql: 'm."amountCents"' },
+        createdAt: { sql: 'm."createdAt"', filter: "dateRange" },
+        paidThrough: { sql: 'm."paidThrough"', filter: "dateRange" }
+      },
+      'm."createdAt" DESC,m.id DESC',
+      "m.id"
+    );
+    const filter = " WHERE " + ACCESS + ' AND (:patientId IS NULL OR m."patientId"=:patientId)' + listing.and;
     const replacements = {
       ...query,
+      ...listing.parameters,
       patientId: query.patientId ?? null,
       own,
       ...clinicScopeParams(actor)
     };
     const items = await this.db.query<MembershipView>(
-      MEMBERSHIP_SELECT + filter + ' ORDER BY m."createdAt" DESC,m.id DESC LIMIT :limit OFFSET :offset',
+      MEMBERSHIP_SELECT + filter + " ORDER BY " + listing.order + " LIMIT :limit OFFSET :offset",
       { replacements, type: QueryTypes.SELECT }
     );
     const [count] = await this.db.query<{ total: number }>(

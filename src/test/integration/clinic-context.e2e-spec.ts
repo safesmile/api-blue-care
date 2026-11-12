@@ -76,7 +76,12 @@ describe("Clinic roles and signed session selection (disposable PostgreSQL)", ()
     await createSuperUser(db, { firstName: "Clinic", lastName: "Operator", email: "context-root@blue.test", password });
     root = await AuthUseCase.resolve(app).login("context-root@blue.test", password);
     rootToken = root.token;
-    clinicA = (await api().post("/clinics").send({ code: "context-a", name: "Context A" }).expect(201)).body;
+    clinicA = (
+      await api()
+        .post("/clinics")
+        .send({ code: "context-a", name: "Context A", icon: "star", color: "blue" })
+        .expect(201)
+    ).body;
     clinicB = (await api().post("/clinics").send({ code: "context-b", name: "Context B" }).expect(201)).body;
     clinicC = (await api().post("/clinics").send({ code: "context-c", name: "Context C" }).expect(201)).body;
     ana = await account("context-ana@blue.test");
@@ -122,7 +127,30 @@ describe("Clinic roles and signed session selection (disposable PostgreSQL)", ()
     expect(ana.user.clinics).toEqual([]);
     expect(ana.user.mode).toBe("patient");
     expect(ana.user).not.toHaveProperty("clinicId");
-    expect((await api().get("/clinics").expect(200)).body.total).toBe(0);
+    expect((await api().get("/clinics").expect(200)).body.items).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: clinicA.id, icon: "star", color: "blue" })])
+    );
+    const context = (await api().get("/auth/me").expect(200)).body;
+    expect(context.clinics).toContainEqual(
+      expect.objectContaining({ id: clinicA.id, icon: "star", color: "blue", roles: [] })
+    );
+    const staff = (
+      await api()
+        .get("/clinics/" + clinicA.id + "/staff")
+        .query({
+          filters: JSON.stringify([{ field: "name", operator: "contains", value: "Clinic Operator" }])
+        })
+        .expect(200)
+    ).body;
+    expect(staff.items).toMatchObject([{ userId: root.user.id }]);
+    expect(staff.total).toBe(1);
+    const inbox = (await api().get("/notifications").expect(200)).body;
+    expect(inbox.items).toContainEqual(
+      expect.objectContaining({ title: "Acceso a una clínica", body: expect.stringContaining("Context A") })
+    );
+    await api()
+      .delete("/clinics/" + clinicC.id + "/staff/" + root.user.id)
+      .expect(204);
     expect((await api().get("/clinics/available").expect(200)).body.total).toBeGreaterThanOrEqual(3);
     await api().post("/patients").send({ clinicId: clinicC.id, firstName: "Denied", lastName: "Patient" }).expect(403);
     await api(ana.token).get("/patients").expect(403);

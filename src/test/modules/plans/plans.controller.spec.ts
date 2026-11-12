@@ -12,7 +12,8 @@ describe("PlansController", () => {
     version: jest.fn(),
     versions: jest.fn(),
     publish: jest.fn(),
-    update: jest.fn()
+    update: jest.fn(),
+    assignBenefit: jest.fn()
   };
   const actor = userFixture().toView(),
     id = "ba50a6d7-3ec5-4fb0-9145-2febbfaf8de8";
@@ -21,6 +22,7 @@ describe("PlansController", () => {
     description: "Membership",
     benefitDescriptions: ["Benefits"],
     monthlyPriceCents: 10000,
+    annualPriceCents: 87000,
     taxDisclosure: "Final total"
   };
   let app;
@@ -53,12 +55,23 @@ describe("PlansController", () => {
       .expect(200);
     expect(service.version).toHaveBeenCalledWith(id, input, actor);
     expect(service.publish).toHaveBeenCalledWith(id, id, actor);
+    await request(app.getHttpServer())
+      .put("/plans/" + id + "/benefits/" + id)
+      .send({ assigned: false })
+      .expect(204);
+    expect(service.assignBenefit).toHaveBeenCalledWith(id, id, false, actor);
+    await request(app.getHttpServer())
+      .put("/plans/" + id + "/benefits/" + id)
+      .send({ assigned: null })
+      .expect(400);
   });
   it("rejects price overrides, invalid amounts, extra fields and destructive routes", async () => {
     for (const extra of [
       { annualPriceCents: 1 },
       { currency: "USD" },
       { monthlyPriceCents: 1.5 },
+      { benefitIds: ["invalid"] },
+      { benefitIds: [id, id] },
       { benefitDescriptions: [{ amount: 1 }] }
     ])
       await request(app.getHttpServer())

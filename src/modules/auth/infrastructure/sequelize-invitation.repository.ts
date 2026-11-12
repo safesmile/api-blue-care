@@ -1,3 +1,4 @@
+import { sqlListQuery } from "../../../shared/infrastructure/sql-list-query";
 import { PermissionCode } from "../../../shared/domain/permission-code";
 import { requirePatientScope } from "../../patients/infrastructure/patient-scope";
 import { patientChange } from "../../patients/domain/patient.events";
@@ -91,23 +92,30 @@ export class SequelizeInvitationRepository extends InvitationRepository {
         await this.authorization.assertClinicAssignable(invitation.props.clinicAssignments ?? [], actor, transaction);
       }
       if (invitation.props.kind === "patient") {
-        if (!actor?.clinicId) throw new BadRequestException("Seleccione una clínica antes de invitar a un paciente");
+        if (!actor) throw new ForbiddenException("La invitación del paciente requiere un usuario autenticado");
         if (!invitation.props.patientId) {
-          const [access] = await this.db.query<{ id: string }>(
+          const eligibleClinics = await this.db.query<{ id: string }>(
             `SELECT c.id FROM clinics c JOIN clinic_staff cs ON cs."clinicId"=c.id
-             WHERE c.id=CAST(:clinicId AS UUID) AND c.enabled AND cs."userId"=:actorId
-             AND blue_care_clinic_allowed(:actorId,c.id,c.id,'invitations:create')
-             AND blue_care_clinic_allowed(:actorId,c.id,c.id,'patients:create')
-             AND blue_care_clinic_allowed(:actorId,c.id,c.id,'patients:link') FOR SHARE OF c,cs`,
-            { replacements: { actorId: actor.id, clinicId: actor.clinicId }, transaction, type: QueryTypes.SELECT }
-          );
-          if (!access)
-            throw new ForbiddenException("Se requieren permisos para crear y vincular pacientes en la clínica actual");
-          const matches = await this.db.query<{ id: string }>(
-            `SELECT p.id FROM patients p JOIN patient_clinics pc ON pc."patientId"=p.id WHERE pc."clinicId"=:clinicId
-            AND LOWER(p.email)=:email FOR UPDATE OF p`,
+             WHERE c.enabled AND cs."userId"=:actorId
+             AND blue_care_clinic_allowed(:actorId,c.id,CAST(:selected AS UUID),'invitations:create')
+             AND blue_care_clinic_allowed(:actorId,c.id,CAST(:selected AS UUID),'patients:create')
+             AND blue_care_clinic_allowed(:actorId,c.id,CAST(:selected AS UUID),'patients:link')
+             ORDER BY cs."createdAt", c.id FOR SHARE OF c,cs`,
             {
-              replacements: { clinicId: actor.clinicId, email: invitation.props.email },
+              replacements: { actorId: actor.id, selected: actor.clinicId ?? null },
+              transaction,
+              type: QueryTypes.SELECT
+            }
+          );
+          const [clinic] = eligibleClinics;
+          if (!clinic)
+            throw new ForbiddenException("No tiene una clínica asignada con permisos para invitar pacientes");
+          const matches = await this.db.query<{ id: string }>(
+            `SELECT p.id FROM patients p WHERE LOWER(p.email)=:email
+            AND EXISTS (SELECT 1 FROM patient_clinics pc WHERE pc."patientId"=p.id AND pc."clinicId" IN (:clinicIds))
+            ORDER BY p.id FOR UPDATE OF p`,
+            {
+              replacements: { clinicIds: eligibleClinics.map(item => item.id), email: invitation.props.email },
               transaction,
               type: QueryTypes.SELECT
             }
@@ -127,7 +135,7 @@ export class SequelizeInvitationRepository extends InvitationRepository {
                   firstName: invitation.props.firstName,
                   lastName: invitation.props.lastName,
                   email: invitation.props.email,
-                  clinicId: actor.clinicId
+                  clinicId: clinic.id
                 },
                 transaction
               }
@@ -141,7 +149,7 @@ export class SequelizeInvitationRepository extends InvitationRepository {
                 firstName: invitation.props.firstName,
                 lastName: invitation.props.lastName,
                 email: invitation.props.email,
-                clinicId: actor.clinicId
+                clinicId: clinic.id
               })
             );
           }
@@ -200,24 +208,42 @@ export class SequelizeInvitationRepository extends InvitationRepository {
    */
   async list(page: Pagination & { kind?: InvitationKind }, actor?: AccessActor) {
     return this.db.transaction({ isolationLevel: Transaction.ISOLATION_LEVELS.REPEATABLE_READ }, async transaction => {
+      const listing = sqlListQuery(
+        page,
+        {
+          name: { sql: '(i."firstName" || \' \' || i."lastName")', filter: "contains" },
+          email: { sql: "i.email", filter: "contains" },
+          status: {
+            sql: "(CASE WHEN i.status='pending' AND i.\"expiresAt\"<=NOW() THEN 'expired' ELSE i.status END)",
+            filter: "in"
+          },
+          deliveryStatus: { sql: 'i."deliveryStatus"', filter: "in" },
+          createdAt: { sql: 'i."createdAt"', filter: "dateRange" }
+        },
+        'i."createdAt" DESC,i.id',
+        "i.id"
+      );
       const global =
         !actor ||
         ((actor.globalPermissions ?? actor.permissions).includes(PermissionCode.InvitationsList) &&
           (actor.globalPermissions ?? actor.permissions).includes(PermissionCode.ClinicsAll));
-      const where = `WHERE (:kind IS NULL OR i.kind=:kind) AND (:global OR (i."invitedBy"=:actorId AND i."patientId" IS NULL AND jsonb_array_length(i."clinicAssignments")=0)
+      const where =
+        `WHERE (:kind IS NULL OR i.kind=:kind) AND (:global OR (i."invitedBy"=:actorId AND i."patientId" IS NULL AND jsonb_array_length(i."clinicAssignments")=0)
         OR (jsonb_array_length(i."clinicAssignments")>0 AND NOT EXISTS(SELECT 1 FROM jsonb_array_elements(i."clinicAssignments") a
         WHERE NOT blue_care_clinic_allowed(:actorId,CAST(a->>'clinicId' AS UUID),CAST(:selected AS UUID),'invitations:list')))
         OR (i."patientId" IS NOT NULL AND EXISTS(SELECT 1 FROM patient_clinics pc JOIN clinics c ON c.id=pc."clinicId" AND c.enabled
-        WHERE pc."patientId"=i."patientId" AND blue_care_clinic_allowed(:actorId,c.id,CAST(:selected AS UUID),'invitations:list'))))`;
+        WHERE pc."patientId"=i."patientId" AND blue_care_clinic_allowed(:actorId,c.id,CAST(:selected AS UUID),'invitations:list'))))` +
+        listing.and;
       const replacements = {
         ...page,
+        ...listing.parameters,
         kind: page.kind ?? null,
         global,
         actorId: actor?.id ?? null,
         selected: actor?.clinicId ?? null
       };
       const ids = await this.db.query<{ id: string }>(
-        "SELECT i.id FROM invitations i " + where + ' ORDER BY i."createdAt" DESC,i.id LIMIT :limit OFFSET :offset',
+        "SELECT i.id FROM invitations i " + where + " ORDER BY " + listing.order + " LIMIT :limit OFFSET :offset",
         { replacements, transaction, type: QueryTypes.SELECT }
       );
       const [count] = await this.db.query<{ total: number }>("SELECT COUNT(*)::int total FROM invitations i " + where, {
@@ -228,14 +254,11 @@ export class SequelizeInvitationRepository extends InvitationRepository {
       const rows = ids.length
         ? await this.model.findAll({
             where: { id: { [Op.in]: ids.map(row => row.id) } },
-            order: [
-              ["createdAt", "DESC"],
-              ["id", "ASC"]
-            ],
             transaction
           })
         : [];
-      return { items: rows.map(row => this.map(row)), total: count.total };
+      const byId = new Map(rows.map(row => [row.id, row]));
+      return { items: ids.map(({ id }) => this.map(byId.get(id)!)), total: count.total };
     });
   }
 

@@ -4,6 +4,7 @@ import { CatalogPlanUseCase } from "../../../modules/plans/application/catalogPl
 import { VersionPlanUseCase } from "../../../modules/plans/application/versionPlan.usecase";
 import { VersionsPlanUseCase } from "../../../modules/plans/application/versionsPlan.usecase";
 import { PublishPlanUseCase } from "../../../modules/plans/application/publishPlan.usecase";
+import { AssignPlanBenefitUseCase } from "../../../modules/plans/application/assignPlanBenefit.usecase";
 /** Adaptador de pruebas de regresión; no se registra en la aplicación. */
 export class PlansUseCase {
   private readonly CrudPlansUseCase: CrudPlansUseCase;
@@ -97,7 +98,8 @@ export class PlansUseCase {
       { provide: CatalogPlanUseCase, useValue: { execute: value.catalog } },
       { provide: VersionPlanUseCase, useValue: { execute: value.version } },
       { provide: VersionsPlanUseCase, useValue: { execute: value.versions } },
-      { provide: PublishPlanUseCase, useValue: { execute: value.publish } }
+      { provide: PublishPlanUseCase, useValue: { execute: value.publish } },
+      { provide: AssignPlanBenefitUseCase, useValue: { execute: value.assignBenefit } }
     ];
   }
   /**

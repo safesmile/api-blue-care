@@ -1,9 +1,9 @@
 import type { Page } from "../../../shared/domain/crud.repository";
 import type { BenefitView } from "../domain/benefit.repository";
 import { PermissionCode } from "../../../shared/domain/permission-code";
-import { Injectable, NotFoundException } from "@nestjs/common";
+import { ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import { BenefitRepository, type BenefitInput, type BenefitQuery } from "../domain/benefit.repository";
-import { type AccessActor } from "../../authorization/domain/access-policy";
+import { AccessPolicy, type AccessActor } from "../../authorization/domain/access-policy";
 import { CrudEntityUseCase, type OperationPolicy } from "../../../shared/application/entity.usecase";
 interface CrudBenefitsUseCaseOperations {
   create: (input: BenefitInput, actor: AccessActor) => Promise<BenefitView>;
@@ -41,6 +41,8 @@ export class CrudBenefitsUseCase extends CrudEntityUseCase<CrudBenefitsUseCaseOp
    * @returns Resultado de la operación.
    */
   protected createEntity(input: BenefitInput, actor: AccessActor) {
+    if (input.initialVersion && !AccessPolicy.allows(actor, PermissionCode.BenefitsVersion))
+      throw new ForbiddenException("No tiene permiso para crear versiones de beneficios");
     return this.benefits.create(input, actor);
   }
   /**

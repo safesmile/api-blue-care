@@ -1,12 +1,14 @@
+import { ListQueryDto } from "../../../shared/presentation/list-query.dto";
 import { CrudEntityController } from "../../../shared/presentation/crud.controller";
 import { PermissionCode } from "../../../shared/domain/permission-code";
-import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Query, Req } from "@nestjs/common";
+import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post, Put, Query, Req } from "@nestjs/common";
 import { CrudPlansUseCase } from "../application/crudPlans.usecase";
 import { CatalogPlanUseCase } from "../application/catalogPlan.usecase";
 import { VersionPlanUseCase } from "../application/versionPlan.usecase";
 import { VersionsPlanUseCase } from "../application/versionsPlan.usecase";
 import { PublishPlanUseCase } from "../application/publishPlan.usecase";
-import { CreatePlanDto, PlanVersionDto, UpdatePlanDto } from "./plans.dto";
+import { AssignPlanBenefitDto, CreatePlanDto, PlanVersionDto, UpdatePlanDto } from "./plans.dto";
+import { AssignPlanBenefitUseCase } from "../application/assignPlanBenefit.usecase";
 import { PaginationDto } from "../../identity/presentation/user.dto";
 import { AuditReasonDto } from "../../../shared/presentation/audit-reason.dto";
 import { Permissions } from "../../auth/presentation/auth.decorators";
@@ -21,13 +23,15 @@ export class PlansController extends CrudEntityController<CrudPlansUseCase> {
    * @param versionPlan Dependencia tipada de versionPlan.
    * @param versionsPlan Dependencia tipada de versionsPlan.
    * @param publishPlan Dependencia tipada de publishPlan.
+   * @param assignPlanBenefit Operación de asignación de beneficios.
    */
   constructor(
     plans: CrudPlansUseCase,
     private readonly catalogPlan: CatalogPlanUseCase,
     private readonly versionPlan: VersionPlanUseCase,
     private readonly versionsPlan: VersionsPlanUseCase,
-    private readonly publishPlan: PublishPlanUseCase
+    private readonly publishPlan: PublishPlanUseCase,
+    private readonly assignPlanBenefit: AssignPlanBenefitUseCase
   ) {
     super(plans);
   }
@@ -38,7 +42,7 @@ export class PlansController extends CrudEntityController<CrudPlansUseCase> {
    * @returns The persisted result or completion of the authorized operation.
    */
   @Get("catalog") @Permissions(PermissionCode.PlansCatalog) catalog(
-    @Query() page: PaginationDto,
+    @Query() page: ListQueryDto,
     @Req() request: AuthRequest
   ) {
     return this.catalogPlan.execute(page, request.user);
@@ -58,7 +62,7 @@ export class PlansController extends CrudEntityController<CrudPlansUseCase> {
    * @param request Request containing the authenticated identity or original webhook bytes.
    * @returns The persisted result or completion of the authorized operation.
    */
-  @Get() @Permissions(PermissionCode.PlansList) list(@Query() page: PaginationDto, @Req() request: AuthRequest) {
+  @Get() @Permissions(PermissionCode.PlansList) list(@Query() page: ListQueryDto, @Req() request: AuthRequest) {
     return this.crud("list", page, request.user);
   }
   /**
@@ -131,5 +135,21 @@ export class PlansController extends CrudEntityController<CrudPlansUseCase> {
     @Req() request: AuthRequest
   ) {
     return this.crud("update", id, input.enabled, request.user);
+  }
+  /**
+   * Updates a catalog benefit assignment for the plan.
+   * @param id Plan identifier.
+   * @param benefitId Benefit identifier.
+   * @param input Desired assignment state.
+   * @param request Authenticated request.
+   * @returns Completion of the change.
+   */
+  @Put(":id/benefits/:benefitId") @HttpCode(204) @Permissions(PermissionCode.PlansUpdate) assignBenefit(
+    @Param("id", ParseUUIDPipe) id: string,
+    @Param("benefitId", ParseUUIDPipe) benefitId: string,
+    @Body() input: AssignPlanBenefitDto,
+    @Req() request: AuthRequest
+  ) {
+    return this.assignPlanBenefit.execute(id, benefitId, input.assigned, request.user);
   }
 }

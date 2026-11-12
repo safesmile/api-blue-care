@@ -1,3 +1,4 @@
+import { ListQueryDto } from "../../../shared/presentation/list-query.dto";
 import { CrudEntityController } from "../../../shared/presentation/crud.controller";
 import { AuditReasonDto } from "../../../shared/presentation/audit-reason.dto";
 import { AUTHORIZATION_PERMISSIONS } from "../domain/authorization.permissions";
@@ -6,7 +7,6 @@ import { CrudRolesUseCase } from "../application/crudRoles.usecase";
 import { RoleDto } from "./role.dto";
 import { Permissions } from "../../auth/presentation/auth.decorators";
 import type { AuthRequest } from "../../auth/presentation/auth.guard";
-import { PaginationDto } from "../../identity/presentation/user.dto";
 /** Explicit administrative role endpoints, each with an operation permission. */
 @Controller("roles")
 export class RolesController extends CrudEntityController<CrudRolesUseCase> {
@@ -24,7 +24,7 @@ export class RolesController extends CrudEntityController<CrudRolesUseCase> {
    * @returns Result of the completed operation.
    */
   @Get() @Permissions(AUTHORIZATION_PERMISSIONS.list.shortcode) list(
-    @Query() page: PaginationDto,
+    @Query() page: ListQueryDto,
     @Req() req: AuthRequest
   ) {
     return this.crud("list", page, req.user);

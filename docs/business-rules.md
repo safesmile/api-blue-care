@@ -200,3 +200,14 @@ El dueño confirmó que el rol inicial admin puede listar y leer fichas de pacie
 ## DN-22 — Invitación de pacientes por administradores (06/11/2026)
 
 El dueño solicita que admin pueda invitar pacientes, reenviar invitaciones y revocarlas. El flujo existente requiere patients:create para registrar la ficha nueva y patients:link para vincularla al aceptar. Se incorporan ambos permisos al rol inicial, junto con los permisos de invitaciones ya existentes. Se aplica el alcance por clínica. El frontend confirma envío, reenvío y revocación mediante un modal y muestra resultados con toasts.
+
+## DN-23 — Clínica automática para invitaciones de pacientes (09/11/2026)
+
+Ya no se exige elegir una clínica antes de invitar a un paciente. La API respeta una clínica seleccionada en la sesión. En «Todas», busca una ficha existente dentro del alcance y, si necesita crearla, usa la asignación activa más antigua con permisos de invitación, creación y vinculación. En caso de empate usa el ID de clínica para mantener un orden estable. Si no hay clínica autorizada, rechaza la operación. Esta regla sustituye el requisito de selección previa de DN-20.
+
+
+## DN-24 — Precios y beneficios por plan (11/11/2026)
+
+- Cada plan admite precios mensual y anual independientes. La relación de diez mensualidades deja de ser una regla del sistema. Los contratos vigentes conservan sus importes.
+- Administración asigna y retira beneficios del catálogo desde cada plan. Retirar una asignación corta el acceso de las membresías de ese plan y conserva los consumos. Al volver a asignarla, los usos del mismo período siguen contando.
+- El máximo de familiares se configura por plan y cuenta las personas adicionales al titular. Cada beneficio tiene su propio cupo por persona y período.

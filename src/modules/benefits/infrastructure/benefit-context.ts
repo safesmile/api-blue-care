@@ -22,6 +22,8 @@ export interface BenefitRecipient {
 }
 const MEMBERSHIP = `SELECT m.*,v."planId",p."userId",p.enabled AS "patientEnabled",(p."firstName" || ' ' || p."lastName") AS "patientName"
  FROM memberships m JOIN plan_versions v ON v.id=m."planVersionId" JOIN patients p ON p.id=m."patientId"`;
+const ASSIGNED_BENEFIT =
+  ' FROM benefit_definitions b JOIN plan_benefits pb ON pb."benefitId"=b.id AND pb."planId"=:planId';
 /** Common transactional resource and quota resolution; ticket presentation grants no general patient access. */
 @Injectable()
 export class BenefitContext {
@@ -85,17 +87,22 @@ export class BenefitContext {
   async benefit(id: string, membership: BenefitMembership, transaction: Transaction, lock = false) {
     // Lock the pointer before joining its immutable revision: a blocked join could otherwise mix old rule data
     // with a newly published pointer under PostgreSQL READ COMMITTED rechecks.
-    if (lock)
-      await this.db.query('SELECT id FROM benefit_definitions WHERE id=:id AND "planId"=:planId FOR SHARE', {
-        replacements: { id, planId: membership.planId },
-        transaction,
-        type: QueryTypes.SELECT
-      });
+    const options = { replacements: { id, planId: membership.planId }, transaction, type: QueryTypes.SELECT } as const;
+    const notAssigned = () => new NotFoundException("El beneficio no pertenece al plan de esta membresía");
+    if (lock) {
+      const [assignment] = await this.db.query(
+        "SELECT b.id" + ASSIGNED_BENEFIT + " WHERE b.id=:id FOR SHARE OF b,pb",
+        options
+      );
+      if (!assignment) throw notAssigned();
+    }
     const [row] = await this.db.query<BenefitView>(
-      'SELECT b.*,TO_JSONB(v) AS "currentVersion" FROM benefit_definitions b LEFT JOIN benefit_versions v ON v.id=b."currentVersionId" WHERE b.id=:id AND b."planId"=:planId',
-      { replacements: { id, planId: membership.planId }, transaction, type: QueryTypes.SELECT }
+      'SELECT b.*,TO_JSONB(v) AS "currentVersion"' +
+        ASSIGNED_BENEFIT +
+        ' LEFT JOIN benefit_versions v ON v.id=b."currentVersionId" WHERE b.id=:id',
+      options
     );
-    if (!row) throw new NotFoundException("El beneficio no pertenece al plan de esta membresía");
+    if (!row) throw notAssigned();
     if (!row.currentVersion) throw new ConflictException("El beneficio no tiene reglas publicadas");
     return row;
   }

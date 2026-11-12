@@ -1,3 +1,4 @@
+import { ListQueryDto } from "../../../shared/presentation/list-query.dto";
 import { CrudEntityController } from "../../../shared/presentation/crud.controller";
 import { PermissionCode } from "../../../shared/domain/permission-code";
 import { AuditReasonDto } from "../../../shared/presentation/audit-reason.dto";
@@ -7,7 +8,7 @@ import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Patch, Post, Query
 import { CollaboratorsUserUseCase } from "../application/collaboratorsUser.usecase";
 import { CollaboratorUserUseCase } from "../application/collaboratorUser.usecase";
 import { CrudUsersUseCase } from "../application/crudUsers.usecase";
-import { CreateUserDto, UpdateUserDto, PaginationDto } from "./user.dto";
+import { CreateUserDto, UpdateUserDto } from "./user.dto";
 import { Permissions } from "../../auth/presentation/auth.decorators";
 /**
  * Exposes explicit user CRUD routes and their required permissions.
@@ -34,7 +35,7 @@ export class UsersController extends CrudEntityController<CrudUsersUseCase> {
    * @returns Visible staff records.
    */
   @Get("collaborators") @Permissions(PermissionCode.ClinicsStaffList) collaborators(
-    @Query() page: PaginationDto,
+    @Query() page: ListQueryDto,
     @Req() request: AuthRequest
   ) {
     return this.collaboratorsUser.execute(page, request.user);
@@ -82,7 +83,7 @@ export class UsersController extends CrudEntityController<CrudUsersUseCase> {
    * @returns Result of the completed operation.
    */
   @Get() @Permissions(IDENTITY_PERMISSIONS.list.shortcode) list(
-    @Query() page: PaginationDto,
+    @Query() page: ListQueryDto,
     @Req() request: AuthRequest
   ) {
     return this.crud("list", page, request.user);

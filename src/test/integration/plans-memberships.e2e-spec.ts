@@ -79,6 +79,7 @@ describe("Versioned plans, memberships and durable provider boundaries (disposab
     description: "Plan comercial de prueba",
     benefitDescriptions: ["Descripción inicial"],
     monthlyPriceCents: 10000,
+    annualPriceCents: 100000,
     taxDisclosure: "Importe final de prueba; no se cobran impuestos adicionales"
   };
   const ownedContract = async (email: string) => {
@@ -161,7 +162,7 @@ describe("Versioned plans, memberships and durable provider boundaries (disposab
   afterAll(async () => {
     if (app) await app.close();
   });
-  it("publishes immutable GTQ price versions and derives annual totals without creating memberships", async () => {
+  it("publishes immutable GTQ price versions without creating memberships", async () => {
     plan = (await api().post("/plans").send({ code: "membership-blue-care-plus" }).expect(201)).body;
     expect((await api(tokenA).get("/plans/catalog").expect(200)).body.items.map(item => item.id)).not.toContain(
       plan.id
@@ -284,12 +285,18 @@ describe("Versioned plans, memberships and durable provider boundaries (disposab
     v2 = (
       await api()
         .post("/plans/" + plan.id + "/versions")
-        .send({ ...versionInput, monthlyPriceCents: 20000, benefitDescriptions: ["Descripción actualizada"] })
+        .send({
+          ...versionInput,
+          monthlyPriceCents: 20000,
+          annualPriceCents: 175000,
+          benefitDescriptions: ["Descripción actualizada"]
+        })
         .expect(201)
     ).body;
     await api()
       .post("/plans/" + plan.id + "/versions/" + v2.id + "/publish")
       .expect(201);
+    expect(v2.annualPriceCents).toBe(175000);
     const existing = (await api(tokenA).get("/memberships/me/" + contractA.id)).body;
     expect(existing).toMatchObject({
       amountCents: 10000,
@@ -315,7 +322,7 @@ describe("Versioned plans, memberships and durable provider boundaries (disposab
     contractB = (
       await api(tokenB).post("/memberships/me").send({ planVersionId: v2.id, cadence: "annual" }).expect(201)
     ).body;
-    expect(contractB.amountCents).toBe(200000);
+    expect(contractB.amountCents).toBe(175000);
     await api()
       .post("/plans/" + plan.id + "/versions/" + v1.id + "/publish")
       .expect(409);
@@ -401,7 +408,7 @@ describe("Versioned plans, memberships and durable provider boundaries (disposab
     ).body.id;
     payments.set("in_membership_annual", {
       id: "in_membership_annual",
-      amountCents: 200000,
+      amountCents: 175000,
       currency: "GTQ",
       paidAt: new Date(),
       checkoutId: contractB.checkoutId,
@@ -485,7 +492,7 @@ describe("Versioned plans, memberships and durable provider boundaries (disposab
         .expect(201)
     ).body;
     expect(next.id).not.toBe(first.id);
-    expect(next.amountCents).toBe(200000);
+    expect(next.amountCents).toBe(175000);
     await expect(
       db.query('UPDATE memberships SET "amountCents"=1 WHERE id=:id', { replacements: { id: next.id } })
     ).rejects.toThrow();

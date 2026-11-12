@@ -1,10 +1,16 @@
-import { IsArray, ArrayMinSize, ArrayUnique, MaxLength as RoleMaxLength } from "class-validator";
-import { Transform, Type } from "class-transformer";
-import { IsBoolean, IsEmail, IsInt, IsString, Length, Matches, Max, Min, ValidateIf } from "class-validator";
+import { ListQueryDto } from "../../../shared/presentation/list-query.dto";
+import { IsArray, ArrayMinSize, ArrayUnique, IsIn, MaxLength as RoleMaxLength } from "class-validator";
+import { CLINIC_COLORS, CLINIC_ICONS, type ClinicColor, type ClinicIcon } from "../domain/clinic.repository";
+import { Transform } from "class-transformer";
+import { IsBoolean, IsEmail, IsString, Length, Matches, ValidateIf } from "class-validator";
 import { AuditReasonDto } from "../../../shared/presentation/audit-reason.dto";
 /** Validates a new clinic. */
 export class CreateClinicDto extends AuditReasonDto {
-  @Transform(({ value }) => (typeof value === "string" ? value.trim() : value))
+  @ValidateIf((_o, value) => value !== undefined) @IsIn(CLINIC_ICONS) icon?: ClinicIcon;
+  @ValidateIf((_o, value) => value !== undefined) @IsIn(CLINIC_COLORS) color?: ClinicColor;
+  @Transform(({ value }) =>
+    typeof value === "string" ? value.trim().replace(/[A-Z]/g, letter => letter.toLowerCase()) : value
+  )
   @IsString()
   @Matches(/^[a-z0-9][a-z0-9-]{0,29}$/)
   code!: string;
@@ -30,8 +36,12 @@ export class CreateClinicDto extends AuditReasonDto {
 }
 /** Validates explicit profile or status changes. */
 export class UpdateClinicDto extends AuditReasonDto {
+  @ValidateIf((_o, value) => value !== undefined) @IsIn(CLINIC_ICONS) icon?: ClinicIcon;
+  @ValidateIf((_o, value) => value !== undefined) @IsIn(CLINIC_COLORS) color?: ClinicColor;
   @ValidateIf((_o, v) => v !== undefined)
-  @Transform(({ value }) => (typeof value === "string" ? value.trim() : value))
+  @Transform(({ value }) =>
+    typeof value === "string" ? value.trim().replace(/[A-Z]/g, letter => letter.toLowerCase()) : value
+  )
   @IsString()
   @Matches(/^[a-z0-9][a-z0-9-]{0,29}$/)
   code?: string;
@@ -58,9 +68,7 @@ export class UpdateClinicDto extends AuditReasonDto {
   @ValidateIf((_o, v) => v !== undefined) @IsBoolean() enabled?: boolean;
 }
 /** Restricts lists to bounded, explicit filters. */
-export class ClinicQueryDto {
-  @Type(() => Number) @IsInt() @Min(1) @Max(100) limit = 25;
-  @Type(() => Number) @IsInt() @Min(0) offset = 0;
+export class ClinicQueryDto extends ListQueryDto {
   @ValidateIf((_o, v) => v !== undefined)
   @Transform(({ value }) => (typeof value === "string" ? value.trim() : value))
   @IsString()

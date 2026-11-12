@@ -67,7 +67,7 @@ export class SqlClinicContextRepository extends ClinicContextRepository {
         };
       }
       const clinics = await this.db.query<AccessibleClinic>(
-        `SELECT c.id,c.name,
+        `SELECT c.id,c.name,c.icon,c.color,
         COALESCE((SELECT ARRAY_AGG(DISTINCT r.name
  ORDER BY r.name)
  FROM user_roles ur

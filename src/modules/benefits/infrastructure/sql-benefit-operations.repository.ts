@@ -204,8 +204,10 @@ export class SqlBenefitOperationsRepository extends BenefitOperationsRepository 
       const member = await this.context.membership(id, actor, own, transaction),
         recipient = await this.context.recipient(member, beneficiaryId, transaction),
         now = await this.context.now(transaction);
+      const assigned =
+        ' FROM plan_benefits pb JOIN benefit_definitions b ON b.id=pb."benefitId" WHERE pb."planId"=:planId AND b."currentVersionId" IS NOT NULL';
       const definitions = await this.db.query<{ id: string }>(
-        'SELECT id FROM benefit_definitions WHERE "planId"=:planId AND "currentVersionId" IS NOT NULL ORDER BY code,id LIMIT :limit OFFSET :offset',
+        "SELECT b.id" + assigned + " ORDER BY b.code,b.id LIMIT :limit OFFSET :offset",
         { replacements: { planId: member.planId, ...page }, transaction, type: QueryTypes.SELECT }
       );
       const items: BenefitBalance[] = [];
@@ -213,10 +215,11 @@ export class SqlBenefitOperationsRepository extends BenefitOperationsRepository 
         const benefit = await this.context.benefit(definition.id, member, transaction);
         items.push(await this.context.balance(member, benefit, recipient, beneficiaryId, now, transaction));
       }
-      const [count] = await this.db.query<{ total: number }>(
-        'SELECT COUNT(*)::int total FROM benefit_definitions WHERE "planId"=:planId AND "currentVersionId" IS NOT NULL',
-        { replacements: { planId: member.planId }, transaction, type: QueryTypes.SELECT }
-      );
+      const [count] = await this.db.query<{ total: number }>("SELECT COUNT(*)::int total" + assigned, {
+        replacements: { planId: member.planId },
+        transaction,
+        type: QueryTypes.SELECT
+      });
       return { items, total: count.total };
     });
   }

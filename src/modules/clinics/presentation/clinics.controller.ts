@@ -17,7 +17,7 @@ import {
 import { Permissions } from "../../auth/presentation/auth.decorators";
 import type { AuthRequest } from "../../auth/presentation/auth.guard";
 import { AuditReasonDto } from "../../../shared/presentation/audit-reason.dto";
-import { PaginationDto } from "../../identity/presentation/user.dto";
+import { ListQueryDto } from "../../../shared/presentation/list-query.dto";
 import { AvailableClinicUseCase } from "../application/availableClinic.usecase";
 import { CrudClinicsUseCase } from "../application/crudClinics.usecase";
 import { StaffClinicUseCase } from "../application/staffClinic.usecase";
@@ -112,7 +112,7 @@ export class ClinicsController extends CrudEntityController<CrudClinicsUseCase> 
    */
   @Get(":id/staff") @Permissions(PermissionCode.ClinicsStaffList) staff(
     @Param("id", ParseUUIDPipe) id: string,
-    @Query() page: PaginationDto,
+    @Query() page: ListQueryDto,
     @Req() request: AuthRequest
   ) {
     return this.staffClinic.execute(id, page, request.user!);

@@ -1,3 +1,4 @@
+import { sqlListQuery } from "../../../shared/infrastructure/sql-list-query";
 import { PermissionCode } from "../../../shared/domain/permission-code";
 import { AuthorizationStore } from "../../authorization/infrastructure/authorization.store";
 import { clinicScopeParams } from "../../clinics/infrastructure/clinic-scope";
@@ -17,6 +18,27 @@ import type { Pagination } from "../../../shared/domain/crud.repository";
 import { ClinicAccess } from "./clinic-access";
 import { recordChange } from "../../audit/infrastructure/record-change";
 import { clinicChange } from "../domain/clinic.events";
+const clinicCatalogFields = {
+  name: { sql: "c.name", filter: "contains" },
+  code: { sql: "c.code", filter: "contains" },
+  enabled: { sql: "c.enabled", filter: "in" },
+  createdAt: { sql: 'c."createdAt"', filter: "dateRange" }
+} as const;
+const clinicListFields = {
+  ...clinicCatalogFields,
+  address: { sql: "c.address", filter: "contains" },
+  createdBy: { sql: 'creation."actorName"', filter: "contains" }
+} as const;
+const clinicStaffFields = {
+  name: { sql: "u.name", filter: "contains" },
+  email: { sql: "u.email", filter: "contains" },
+  createdAt: { sql: 's."createdAt"', filter: "dateRange" }
+} as const;
+const clinicCreationJoin = ` LEFT JOIN LATERAL (
+  SELECT a."actorName" FROM audit_events a
+  WHERE a."resourceType"='clinic' AND a."resourceId"=c.id::text AND a.action='clinic.created'
+  ORDER BY a."occurredAt", a.id LIMIT 1
+) creation ON TRUE `;
 /** Persists clinic catalog and access grants with their audit records. */
 @Injectable()
 export class SqlClinicRepository extends ClinicRepository {
@@ -40,6 +62,7 @@ export class SqlClinicRepository extends ClinicRepository {
    * @returns The authorized result or completion of the operation.
    */
   async available(query: ClinicQuery, actor: AccessActor) {
+    const listing = sqlListQuery(query, clinicCatalogFields, "c.name,c.id", "c.id");
     const grants = actor.globalPermissions ?? actor.permissions;
     const global = grants.includes(PermissionCode.ClinicsStaffManage) && grants.includes(PermissionCode.ClinicsAll);
     const scope = global
@@ -47,15 +70,21 @@ export class SqlClinicRepository extends ClinicRepository {
       : "WHERE blue_care_clinic_allowed(:actorId,c.id,CAST(:currentClinicId AS UUID),'clinics:staff-manage')";
     const where =
       scope +
-      " AND (:enabled IS NULL OR c.enabled=:enabled) AND (:search IS NULL OR c.name ILIKE :search ESCAPE '!' OR c.code ILIKE :search ESCAPE '!')";
+      " AND (:enabled IS NULL OR c.enabled=:enabled) AND (:search IS NULL OR c.name ILIKE :search ESCAPE '!' OR c.code ILIKE :search ESCAPE '!')" +
+      listing.and;
     const replacements = {
       ...query,
+      ...listing.parameters,
       ...clinicScopeParams(actor),
       enabled: query.enabled ?? true,
       search: query.search === undefined ? null : "%" + query.search.replace(/[!%_]/g, "!$&") + "%"
     };
     const items = await this.db.query<ClinicView>(
-      "SELECT c.* FROM clinics c " + where + " ORDER BY c.name,c.id LIMIT :limit OFFSET :offset",
+      'SELECT c.*, NULL::text AS "createdBy" FROM clinics c ' +
+        where +
+        " ORDER BY " +
+        listing.order +
+        " LIMIT :limit OFFSET :offset",
       { replacements, type: QueryTypes.SELECT }
     );
     const [count] = await this.db.query<{ total: number }>("SELECT COUNT(*)::int total FROM clinics c " + where, {
@@ -75,22 +104,38 @@ export class SqlClinicRepository extends ClinicRepository {
     try {
       return await this.db.transaction(async transaction => {
         const [row] = await this.db.query<ClinicView>(
-          `INSERT INTO clinics (id,code,name,address,phone,email,enabled,"createdAt","updatedAt")
-           VALUES (:id,:code,:name,:address,:phone,:email,true,NOW(),NOW()) RETURNING *`,
+          `INSERT INTO clinics (id,code,name,address,phone,email,icon,color,enabled,"createdAt","updatedAt")
+           VALUES (:id,:code,:name,:address,:phone,:email,:icon,:color,true,NOW(),NOW()) RETURNING *`,
           {
             replacements: {
               ...input,
               id,
               address: input.address ?? null,
               phone: input.phone ?? null,
-              email: input.email ?? null
+              email: input.email ?? null,
+              icon: input.icon ?? "clinic",
+              color: input.color ?? "teal"
             },
             transaction,
             type: QueryTypes.SELECT
           }
         );
         await recordChange(this.db, transaction, clinicChange("clinic.created", id, actor.id, null, row));
-        return row;
+        await this.db.query('INSERT INTO clinic_staff ("clinicId","userId","createdAt") VALUES (:id,:actorId,NOW())', {
+          replacements: { id, actorId: actor.id },
+          transaction
+        });
+        await recordChange(this.db, transaction, {
+          ...clinicChange("clinic.staff-assigned", id, actor.id, null, { userId: actor.id }),
+          notifications: [
+            {
+              userId: actor.id,
+              title: "Acceso a una clínica",
+              body: "Ya tienes acceso a " + row.name + ". Consulta tus clínicas disponibles en Blue Care."
+            }
+          ]
+        });
+        return this.clinicWithCreator(id, transaction);
       });
     } catch (error) {
       if (error instanceof UniqueConstraintError) throw new ConflictException("El código de la clínica ya existe");
@@ -105,10 +150,23 @@ export class SqlClinicRepository extends ClinicRepository {
    */
   async read(id: string, actor: AccessActor) {
     await this.access.require(id, actor);
-    const [row] = await this.db.query<ClinicView>("SELECT * FROM clinics WHERE id=:id", {
-      replacements: { id },
-      type: QueryTypes.SELECT
-    });
+    return this.clinicWithCreator(id);
+  }
+  /**
+   * Reads catalog metadata together with its original creation actor.
+   * @param id Clinic identifier.
+   * @param transaction Transaction containing a catalog change, when applicable.
+   * @returns The clinic and the author recorded at creation.
+   */
+  private async clinicWithCreator(id: string, transaction?: Transaction) {
+    const [row] = await this.db.query<ClinicView>(
+      'SELECT c.*, creation."actorName" AS "createdBy" FROM clinics c' + clinicCreationJoin + "WHERE c.id=:id",
+      {
+        replacements: { id },
+        transaction,
+        type: QueryTypes.SELECT
+      }
+    );
     return row ?? null;
   }
   /**
@@ -118,23 +176,35 @@ export class SqlClinicRepository extends ClinicRepository {
    * @returns The persisted result or completion of the authorized operation.
    */
   async list(query: ClinicQuery, actor: AccessActor) {
-    const filter = `WHERE blue_care_clinic_allowed(:actorId,c.id,CAST(:currentClinicId AS UUID),CAST(:clinicPermission AS TEXT))
-      AND (:enabled IS NULL OR c.enabled=:enabled) AND (:search IS NULL OR c.name ILIKE :search ESCAPE '!' OR c.code ILIKE :search ESCAPE '!')`;
+    const listing = sqlListQuery(query, clinicListFields, "c.name,c.id", "c.id");
+    const filter =
+      `WHERE blue_care_clinic_allowed(:actorId,c.id,CAST(:currentClinicId AS UUID),CAST(:clinicPermission AS TEXT))
+      AND (:enabled IS NULL OR c.enabled=:enabled) AND (:search IS NULL OR c.name ILIKE :search ESCAPE '!' OR c.code ILIKE :search ESCAPE '!')` +
+      listing.and;
     const replacements = {
       ...query,
+      ...listing.parameters,
       ...clinicScopeParams(actor),
       actorId: actor.id,
       enabled: query.enabled ?? null,
       search: query.search === undefined ? null : "%" + query.search.replace(/[!%_]/g, "!$&") + "%"
     };
     const items = await this.db.query<ClinicView>(
-      "SELECT c.* FROM clinics c " + filter + " ORDER BY c.name,c.id LIMIT :limit OFFSET :offset",
+      'SELECT c.*, creation."actorName" AS "createdBy" FROM clinics c' +
+        clinicCreationJoin +
+        filter +
+        " ORDER BY " +
+        listing.order +
+        " LIMIT :limit OFFSET :offset",
       { replacements, type: QueryTypes.SELECT }
     );
-    const [count] = await this.db.query<{ total: number }>("SELECT COUNT(*)::int total FROM clinics c " + filter, {
-      replacements,
-      type: QueryTypes.SELECT
-    });
+    const [count] = await this.db.query<{ total: number }>(
+      "SELECT COUNT(*)::int total FROM clinics c" + clinicCreationJoin + filter,
+      {
+        replacements,
+        type: QueryTypes.SELECT
+      }
+    );
     return { items, total: count.total };
   }
   /**
@@ -156,14 +226,14 @@ export class SqlClinicRepository extends ClinicRepository {
         if (!before) throw new NotFoundException("No se encontró la clínica");
         await this.access.require(id, actor, transaction);
         const next = { ...before };
-        for (const field of ["code", "name", "address", "phone", "email", "enabled"] as const)
+        for (const field of ["code", "name", "address", "phone", "email", "icon", "color", "enabled"] as const)
           if (input[field] !== undefined) Object.assign(next, { [field]: input[field] });
         const [after] = await this.db.query<ClinicView>(
-          'UPDATE clinics SET code=:code,name=:name,address=:address,phone=:phone,email=:email,enabled=:enabled,"updatedAt"=NOW() WHERE id=:id RETURNING *',
+          'UPDATE clinics SET code=:code,name=:name,address=:address,phone=:phone,email=:email,icon=:icon,color=:color,enabled=:enabled,"updatedAt"=NOW() WHERE id=:id RETURNING *',
           { replacements: { ...next }, transaction, type: QueryTypes.SELECT }
         );
         await recordChange(this.db, transaction, clinicChange("clinic.updated", id, actor.id, before, after));
-        return after;
+        return this.clinicWithCreator(id, transaction);
       });
     } catch (error) {
       if (error instanceof UniqueConstraintError) throw new ConflictException("El código de la clínica ya existe");
@@ -181,7 +251,9 @@ export class SqlClinicRepository extends ClinicRepository {
     const global = actor.globalPermissions ?? actor.permissions;
     if (!(global.includes(PermissionCode.ClinicsStaffList) && global.includes(PermissionCode.ClinicsAll)))
       await this.access.require(id, actor);
-    const replacements = { id, ...page };
+    const listing = sqlListQuery(page, clinicStaffFields, 'u.name,s."userId"', 's."userId"');
+    const from = ' FROM clinic_staff s JOIN users u ON u.id=s."userId" WHERE s."clinicId"=:id' + listing.and;
+    const replacements = { id, ...page, ...listing.parameters };
     const items = await this.db.query<ClinicStaffView>(
       `SELECT s.*,u.name,u.email,COALESCE((SELECT ARRAY_AGG(r.name
  ORDER BY r.name)
@@ -189,18 +261,17 @@ export class SqlClinicRepository extends ClinicRepository {
  JOIN roles r
  ON r.id=ur."roleId"
  WHERE ur."userId"=s."userId"
- AND ur."clinicId"=s."clinicId"),'{}') AS roles
- FROM clinic_staff s
- JOIN users u
- ON u.id=s."userId"
- WHERE s."clinicId"=:id
- ORDER BY s."userId" LIMIT :limit OFFSET :offset`,
+ AND ur."clinicId"=s."clinicId"),'{}') AS roles` +
+        from +
+        " ORDER BY " +
+        listing.order +
+        " LIMIT :limit OFFSET :offset",
       { replacements, type: QueryTypes.SELECT }
     );
-    const [count] = await this.db.query<{ total: number }>(
-      'SELECT COUNT(*)::int total FROM clinic_staff WHERE "clinicId"=:id',
-      { replacements, type: QueryTypes.SELECT }
-    );
+    const [count] = await this.db.query<{ total: number }>("SELECT COUNT(*)::int total" + from, {
+      replacements,
+      type: QueryTypes.SELECT
+    });
     return { items, total: count.total };
   }
   /**

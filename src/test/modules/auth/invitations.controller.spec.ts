@@ -1,3 +1,4 @@
+import type { AuthRequest } from "../../../modules/auth/presentation/auth.guard";
 import { GoneException, type INestApplication } from "@nestjs/common";
 import request from "supertest";
 import { InvitationsController } from "../../../modules/auth/presentation/invitations.controller";
@@ -85,6 +86,16 @@ describe("InvitationsController", () => {
     await request(app.getHttpServer())
       .post("/auth/invitations/" + id + "/revoke")
       .expect(204);
+    expect(invitations.revoke).toHaveBeenCalledWith(id, actor);
+  });
+  it("supports invitation follow-up without an audit reason", async () => {
+    const controller = app.get(InvitationsController);
+    const authenticated = { user: actor } as AuthRequest;
+    invitations.resend.mockResolvedValue({ id });
+    invitations.revoke.mockResolvedValue(undefined);
+    await expect(controller.resend(id, authenticated)).resolves.toEqual({ id });
+    await expect(controller.revoke(id, authenticated)).resolves.toBeUndefined();
+    expect(invitations.resend).toHaveBeenCalledWith(id, actor);
     expect(invitations.revoke).toHaveBeenCalledWith(id, actor);
   });
   it("rejects invalid identifiers before resending", async () => {

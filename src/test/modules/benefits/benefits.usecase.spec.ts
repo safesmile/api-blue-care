@@ -2,6 +2,7 @@ import { BadRequestException, ForbiddenException, NotFoundException } from "@nes
 import { BenefitsUseCase } from "../../helpers/usecases/BenefitsUseCase";
 import { REGISTERED_PERMISSIONS } from "../../../modules/authorization/infrastructure/permission-registry";
 import { userFixture } from "../../helpers/identity.fixture";
+import { PermissionCode } from "../../../shared/domain/permission-code";
 describe("BenefitsUseCase", () => {
   const repository = {
     create: jest.fn(),
@@ -32,12 +33,22 @@ describe("BenefitsUseCase", () => {
   };
   it("requires operation authority and handles missing definitions", async () => {
     expect(() => service.list(page, { ...actor, permissions: [] })).toThrow(ForbiddenException);
+    expect(() =>
+      service.create(
+        { ...definition, initialVersion: version },
+        {
+          ...actor,
+          permissions: [PermissionCode.BenefitsCreate]
+        }
+      )
+    ).toThrow(ForbiddenException);
     await expect(service.read("missing", actor)).rejects.toBeInstanceOf(NotFoundException);
   });
   it("delegates explicit definition, revision, publication and capacity operations", async () => {
     repository.read.mockResolvedValue(definition);
     expect(await service.read("benefit", actor)).toBe(definition);
     await service.create(definition, actor);
+    await service.create({ ...definition, initialVersion: version }, actor);
     await service.list(page, actor);
     await service.version("benefit", version, actor);
     await service.version("benefit", { ...version, discountBasisPoints: null }, actor);

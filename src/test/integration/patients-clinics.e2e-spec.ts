@@ -79,7 +79,7 @@ describe("Patients, clinics and verified account binding (disposable PostgreSQL)
       await api()
         .post("/clinics")
         .send({
-          code: "suite-north",
+          code: "Suite-NORTH",
           name: "North",
           address: "North address",
           phone: "12345678",
@@ -87,10 +87,12 @@ describe("Patients, clinics and verified account binding (disposable PostgreSQL)
         })
         .expect(201)
     ).body;
+    expect(clinicA.code).toBe("suite-north");
     await assignClinicOperator(app, rootToken, clinicA.id);
+    expect(clinicA.createdBy).toEqual(expect.any(String));
     clinicB = (await api().post("/clinics").send({ code: "suite-south", name: "South" }).expect(201)).body;
     await assignClinicOperator(app, rootToken, clinicB.id);
-    await api().post("/clinics").send({ code: "suite-north", name: "Duplicate" }).expect(409);
+    await api().post("/clinics").send({ code: "SUITE-NORTH", name: "Duplicate" }).expect(409);
     patientA = (
       await api()
         .post("/patients")
@@ -169,6 +171,23 @@ describe("Patients, clinics and verified account binding (disposable PostgreSQL)
       .expect(204);
     const catalog = await api(staffToken).get("/clinics").expect(200);
     expect(catalog.body.items.map(item => item.id)).toEqual([clinicA.id]);
+    const filtered = await api(staffToken)
+      .get("/clinics")
+      .query({
+        sortBy: "createdBy",
+        sortOrder: "asc",
+        filters: JSON.stringify([
+          { field: "address", operator: "contains", value: "North" },
+          { field: "createdBy", operator: "contains", value: clinicA.createdBy }
+        ])
+      })
+      .expect(200);
+    expect(filtered.body.total).toBe(1);
+    expect(filtered.body.items[0]).toMatchObject({ id: clinicA.id, createdBy: clinicA.createdBy });
+    const detail = await api(staffToken)
+      .get("/clinics/" + clinicA.id)
+      .expect(200);
+    expect(detail.body.createdBy).toBe(clinicA.createdBy);
     await api(staffToken)
       .get("/clinics/" + clinicB.id)
       .expect(403);
@@ -466,10 +485,11 @@ describe("Patients, clinics and verified account binding (disposable PostgreSQL)
     expect(rows).toHaveLength(1);
   });
   it("deactivates clinics without erasing records and blocks new registrations there", async () => {
-    await api()
+    const updated = await api()
       .patch("/clinics/" + clinicA.id)
-      .send({ enabled: false })
+      .send({ enabled: false, code: "BD-001" })
       .expect(200);
+    expect(updated.body.code).toBe("bd-001");
     await api(staffToken)
       .get("/patients/" + patientA.id)
       .expect(403);

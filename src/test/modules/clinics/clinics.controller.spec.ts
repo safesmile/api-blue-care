@@ -25,7 +25,11 @@ describe("ClinicsController", () => {
     await app.close();
   });
   it("forwards validated input and the session actor on every route", async () => {
-    await request(app.getHttpServer()).post("/clinics").send({ code: "north", name: "North" }).expect(201);
+    await request(app.getHttpServer())
+      .post("/clinics")
+      .send({ code: "North", name: "North", icon: "star", color: "blue" })
+      .expect(201);
+    expect(clinics.create).toHaveBeenCalledWith({ code: "north", name: "North", icon: "star", color: "blue" }, actor);
     await request(app.getHttpServer()).get("/clinics?enabled=false&search=North").expect(200);
     await request(app.getHttpServer()).get("/clinics?enabled=true").expect(200);
     await request(app.getHttpServer()).get("/clinics").expect(200);
@@ -52,7 +56,15 @@ describe("ClinicsController", () => {
     expect(clinics.update).toHaveBeenCalledWith(id, { enabled: false, address: null }, actor);
   });
   it("rejects malformed and hidden fields and provides no destructive catalog route", async () => {
-    await request(app.getHttpServer()).post("/clinics").send({ code: "North", name: "North" }).expect(400);
+    await request(app.getHttpServer()).post("/clinics").send({ code: "-north", name: "North" }).expect(400);
+    await request(app.getHttpServer())
+      .post("/clinics")
+      .send({ code: "north", name: "North", icon: "custom" })
+      .expect(400);
+    await request(app.getHttpServer())
+      .patch("/clinics/" + id)
+      .send({ color: "#abcdef" })
+      .expect(400);
     await request(app.getHttpServer())
       .post("/clinics")
       .send({ code: "north", name: "North", enabled: true })

@@ -391,6 +391,7 @@ describe("Prevention, reminders, push and dashboard (disposable PostgreSQL)", ()
           description: "Test only",
           benefitDescriptions: [],
           monthlyPriceCents: 10000,
+          annualPriceCents: 100000,
           taxDisclosure: "Test fixture"
         })
         .expect(201)

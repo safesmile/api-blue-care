@@ -16,7 +16,7 @@ export function clinicChange(
   before: object | null,
   after: object | null
 ): ChangeInput {
-  const fields = ["id", "code", "name", "address", "phone", "email", "enabled", "clinicId", "userId"];
+  const fields = ["id", "code", "name", "address", "phone", "email", "icon", "color", "enabled", "clinicId", "userId"];
   return {
     action,
     resourceType: "clinic",

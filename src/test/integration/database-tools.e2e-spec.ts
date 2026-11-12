@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { Sequelize, QueryTypes } from "sequelize";
 import { databaseOptions } from "../../../database/connection";
+import { createSuperUser } from "../../../scripts/lib/super-user";
 describe("TypeScript database commands", () => {
   const name = "blue_dent_tools_" + randomUUID().replace(/-/g, "");
   let admin: Sequelize, db: Sequelize;
@@ -53,9 +54,48 @@ describe("TypeScript database commands", () => {
     });
     expect(users).toEqual([{ id }]);
     execute("db:migrate:undo");
-    expect(await db.getQueryInterface().tableExists("preventive_events")).toBe(false);
+    expect(await db.getQueryInterface().describeTable("plan_versions")).not.toHaveProperty("maxBeneficiaries");
+    execute("db:migrate:undo");
+    expect(await db.getQueryInterface().describeTable("plan_versions")).not.toHaveProperty("benefitIds");
+    execute("db:migrate:undo");
+    expect(await db.getQueryInterface().tableExists("plan_benefits")).toBe(false);
+    execute("db:migrate:undo");
+    expect(await db.getQueryInterface().describeTable("clinics")).not.toHaveProperty("icon");
+    const creator = await createSuperUser(db, {
+      firstName: "Migration",
+      lastName: "Creator",
+      email: "migration-creator@blue.test",
+      password: "Abcd123!"
+    });
+    const recover = randomUUID(),
+      revoked = randomUUID();
+    await db.query(
+      `INSERT INTO clinics (id,code,name,"createdAt","updatedAt")
+       VALUES (:recover,'recover','Recover',NOW(),NOW()),(:revoked,'revoked','Revoked',NOW(),NOW())`,
+      { replacements: { recover, revoked } }
+    );
+    await db.query(
+      `INSERT INTO audit_events (id,"occurredAt","requestId","actorId","actorType",action,"resourceType","resourceId","before")
+       VALUES (gen_random_uuid(),NOW(),gen_random_uuid(),:creator,'user','clinic.created','clinic',:recover,NULL),
+       (gen_random_uuid(),NOW(),gen_random_uuid(),:creator,'user','clinic.created','clinic',:revoked,NULL),
+       (gen_random_uuid(),NOW(),gen_random_uuid(),:creator,'user','clinic.staff-unassigned','clinic',:revoked,
+        jsonb_build_object('userId',CAST(:creator AS UUID)))`,
+      { replacements: { recover, revoked, creator: creator.id } }
+    );
     execute("db:migrate");
-    expect(await db.getQueryInterface().tableExists("preventive_events")).toBe(true);
+    expect(
+      await db.query('SELECT "clinicId" FROM clinic_staff WHERE "userId"=:id', {
+        replacements: { id: creator.id },
+        type: QueryTypes.SELECT
+      })
+    ).toEqual([{ clinicId: recover }]);
+    expect(
+      await db.query('SELECT title FROM notifications WHERE "userId"=:id AND title=:title', {
+        replacements: { id: creator.id, title: "Acceso a una clínica" },
+        type: QueryTypes.SELECT
+      })
+    ).toEqual([{ title: "Acceso a una clínica" }]);
+    expect(await db.getQueryInterface().describeTable("clinics")).toHaveProperty("icon");
   }, 90000);
   it("rebuilds with TypeScript migrations and seeds three verified role accounts", async () => {
     execute("db:migrate:undo:all");

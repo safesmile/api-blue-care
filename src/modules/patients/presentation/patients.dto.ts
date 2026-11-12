@@ -1,17 +1,6 @@
-import { Transform, Type } from "class-transformer";
-import {
-  IsBoolean,
-  IsEmail,
-  IsInt,
-  IsISO8601,
-  IsString,
-  IsUUID,
-  Length,
-  Matches,
-  Max,
-  Min,
-  ValidateIf
-} from "class-validator";
+import { ListQueryDto } from "../../../shared/presentation/list-query.dto";
+import { Transform } from "class-transformer";
+import { IsBoolean, IsEmail, IsISO8601, IsString, IsUUID, Length, Matches, ValidateIf } from "class-validator";
 import { AuditReasonDto } from "../../../shared/presentation/audit-reason.dto";
 /** Validates patient creation in a known clinic. */
 export class CreatePatientDto extends AuditReasonDto {
@@ -90,9 +79,7 @@ export class UpdatePatientDto extends AuditReasonDto {
   @ValidateIf((_o, v) => v !== undefined) @IsBoolean() enabled?: boolean;
 }
 /** Restricts lists to bounded, explicit filters. */
-export class PatientQueryDto {
-  @Type(() => Number) @IsInt() @Min(1) @Max(100) limit = 25;
-  @Type(() => Number) @IsInt() @Min(0) offset = 0;
+export class PatientQueryDto extends ListQueryDto {
   @ValidateIf((_o, v) => v !== undefined)
   @Transform(({ value }) => (typeof value === "string" ? value.trim() : value))
   @IsString()

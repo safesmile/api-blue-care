@@ -188,6 +188,7 @@ describe("Atomic global benefits and individual family quota (disposable Postgre
           description: "Test plan",
           benefitDescriptions: [],
           monthlyPriceCents: 10000,
+          annualPriceCents: 100000,
           taxDisclosure: "Fixture total only"
         })
         .expect(201)
@@ -251,6 +252,35 @@ describe("Atomic global benefits and individual family quota (disposable Postgre
     await api(owner.token).get("/benefits").expect(403);
     await api(owner.token).post("/benefits/consumptions").send(consumption(holder.id, clinicA.id)).expect(403);
   });
+  it("creates the benefit and its first draft together and rolls back an invalid rule", async () => {
+    const definition = { code: "atomic-benefit", kind: "discount", period: "monthly", audience: "all" };
+    const initialVersion = {
+      name: "Descuento de prueba",
+      description: "Servicio de prueba",
+      limitUnits: 2,
+      enabled: true
+    };
+    await api()
+      .post("/benefits")
+      .send({ ...definition, initialVersion })
+      .expect(400);
+    const response = await api()
+      .post("/benefits")
+      .send({
+        ...definition,
+        initialVersion: { ...initialVersion, discountBasisPoints: 1250 }
+      })
+      .expect(201);
+    expect(response.body).toMatchObject({
+      code: definition.code,
+      currentVersion: null,
+      latestDraft: { ...initialVersion, number: 1, publishedAt: null, discountBasisPoints: 1250 }
+    });
+    const read = await api()
+      .get("/benefits/" + response.body.id)
+      .expect(200);
+    expect(read.body.latestDraft.id).toBe(response.body.latestDraft.id);
+  });
   it("allows exactly one winner when twelve requests from different clinics compete for the last global unit", async () => {
     const responses = await Promise.all(
       Array.from({ length: 12 }, (_, i) =>
@@ -268,6 +298,106 @@ describe("Atomic global benefits and individual family quota (disposable Postgre
       { replacements: { id: owner.membership.id, benefitId: holder.id }, type: QueryTypes.SELECT }
     );
     expect(count.total).toBe(1);
+  });
+  it("manages catalog assignments without erasing consumed quota", async () => {
+    const reusable = (
+      await api()
+        .post("/benefits")
+        .send({
+          code: "reusable-service",
+          kind: "service",
+          period: "monthly",
+          audience: "holder"
+        })
+        .expect(201)
+    ).body;
+    const otherPlan = (await api().post("/plans").send({ code: "other-benefit-plan" }).expect(201)).body;
+    const assignment = (planId: string, benefitId: string) => "/plans/" + planId + "/benefits/" + benefitId;
+    await api().put(assignment(plan.id, reusable.id)).send({ assigned: true }).expect(204);
+    await api().put(assignment(otherPlan.id, reusable.id)).send({ assigned: true }).expect(204);
+    const list = (await api().get("/benefits").query({ planId: otherPlan.id }).expect(200)).body;
+    expect(list.items.map(row => row.id)).toEqual([reusable.id]);
+    await api().put(assignment(plan.id, reusable.id)).send({ assigned: false }).expect(204);
+    const search = (
+      await api()
+        .get("/benefits")
+        .query({
+          availableForPlanId: plan.id,
+          filters: JSON.stringify([{ field: "search", operator: "contains", value: "reusable" }])
+        })
+        .expect(200)
+    ).body;
+    expect(search.items.map(row => row.id)).toEqual([reusable.id]);
+
+    await api().put(assignment(plan.id, holder.id)).send({ assigned: false }).expect(204);
+    await api().post("/benefits/consumptions").send(consumption(holder.id, clinicA.id)).expect(404);
+    await api().put(assignment(plan.id, holder.id)).send({ assigned: true }).expect(204);
+    expect(await balance(holder.id)).toMatchObject({ usedUnits: 1, remainingUnits: 0 });
+  });
+  it("publishes draft benefits and the family limit atomically", async () => {
+    const other = (await api().post("/plans").send({ code: "public-benefit-offer" }).expect(201)).body;
+    const path = "/plans/" + other.id + "/versions";
+    const offer = {
+      name: "Public offer",
+      description: "Shared care",
+      monthlyPriceCents: 8000,
+      annualPriceCents: 75500,
+      taxDisclosure: "Final amount"
+    };
+    const publicOffers = () => api(owner.token).get("/plans/catalog");
+    const filter = { filters: JSON.stringify([{ field: "id", operator: "in", value: [other.id] }]) };
+    await api()
+      .post(path)
+      .send({ ...offer, benefitIds: [randomUUID()] })
+      .expect(400);
+    const draft = (
+      await api()
+        .post(path)
+        .send({ ...offer, benefitIds: [holder.id], maxBeneficiaries: 6 })
+        .expect(201)
+    ).body;
+    expect((await publicOffers().query(filter).expect(200)).body.items).toEqual([]);
+    expect((await api().get("/benefits").query({ planId: other.id }).expect(200)).body.total).toBe(0);
+    const before = (
+      await api()
+        .get("/plans/" + other.id)
+        .expect(200)
+    ).body;
+    expect(before).toMatchObject({
+      maxBeneficiaries: 4,
+      latestDraft: { id: draft.id, maxBeneficiaries: 6 },
+      draftBenefits: [{ id: holder.id }]
+    });
+    await api()
+      .post(path + "/" + draft.id + "/publish")
+      .expect(201);
+    expect((await publicOffers().query(filter).expect(200)).body.items).toMatchObject([
+      { id: other.id, currentVersion: offer, benefits: [{ id: holder.id }] }
+    ]);
+    const next = (
+      await api()
+        .post(path)
+        .send({ ...offer, benefitIds: [], maxBeneficiaries: 0 })
+        .expect(201)
+    ).body;
+    expect((await publicOffers().query(filter).expect(200)).body.items[0].benefits).toHaveLength(1);
+    await api()
+      .post(path + "/" + next.id + "/publish")
+      .expect(201);
+    expect((await publicOffers().query(filter).expect(200)).body.items[0].benefits).toEqual([]);
+    expect(
+      (
+        await api()
+          .get("/plans/" + other.id)
+          .expect(200)
+      ).body.maxBeneficiaries
+    ).toBe(0);
+    expect(await balance(holder.id)).toMatchObject({ usedUnits: 1 });
+    await api()
+      .patch("/plans/" + other.id)
+      .send({ enabled: false })
+      .expect(200);
+    expect((await publicOffers().query(filter).expect(200)).body.items).toEqual([]);
   });
   it("returns the original result for identical retries and rejects key reuse with other data", async () => {
     const payload = {

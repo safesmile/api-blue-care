@@ -1,6 +1,6 @@
 import type { InvitationStatus } from "../domain/invitation.entity";
 import type { ClinicRoleAssignment } from "../../authorization/domain/clinic-context.repository";
-import { BadRequestException, Injectable } from "@nestjs/common";
+import { Injectable } from "@nestjs/common";
 import { type InvitationActor, type InvitationKind } from "../domain/invitation.entity";
 import type { RoleName } from "../../../permissions";
 import { EntityUseCase } from "../../../shared/application/entity.usecase";
@@ -59,7 +59,6 @@ export class InvitePatientInvitationUseCase extends EntityUseCase<
     input: Omit<CreateInvitationInput, "roles" | "staff" | "kind" | "clinicAssignments">,
     actor: InvitationActor
   ) {
-    if (!actor.clinicId) throw new BadRequestException("Seleccione una clínica antes de invitar a un paciente");
     return this.createOperation.create(
       { ...input, roles: ["customer"], staff: false, clinicAssignments: [], kind: "patient" },
       actor

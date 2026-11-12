@@ -1,4 +1,4 @@
-import { PaginationDto } from "../../identity/presentation/user.dto";
+import { ListQueryDto } from "../../../shared/presentation/list-query.dto";
 import { AuditReasonDto } from "../../../shared/presentation/audit-reason.dto";
 import { Type, Transform } from "class-transformer";
 import {
@@ -47,7 +47,7 @@ export class ClinicRoleQueryDto {
   @IsUUID() clinicId!: string;
 }
 /** Filter invitation history before counting and pagination. */
-export class InvitationQueryDto extends PaginationDto {
+export class InvitationQueryDto extends ListQueryDto {
   @ValidateIf((_o, value) => value !== undefined) @IsIn(["general", "patient", "collaborator"]) kind?:
     "general" | "patient" | "collaborator";
 }

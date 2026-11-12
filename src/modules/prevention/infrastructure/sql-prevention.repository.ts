@@ -1,3 +1,4 @@
+import { sqlListQuery } from "../../../shared/infrastructure/sql-list-query";
 import { clinicScopeParams } from "../../clinics/infrastructure/clinic-scope";
 import { auditSnapshot } from "../../audit/domain/audit-snapshot";
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
@@ -146,9 +147,16 @@ export class SqlPreventionRepository extends PreventionRepository {
    */
   async list(query: EventQuery, actor: AccessActor, own: boolean) {
     return this.db.transaction({ isolationLevel: Transaction.ISOLATION_LEVELS.REPEATABLE_READ }, async transaction => {
+      const listing = sqlListQuery(
+        query,
+        { status: { sql: "e.status", filter: "in" }, dueAt: { sql: 'e."dueAt"', filter: "dateRange" } },
+        'e."dueAt",e.id',
+        "e.id"
+      );
       if (query.clinicId && !own) await this.clinics.require(query.clinicId, actor, transaction);
       const replacements = {
         ...query,
+        ...listing.parameters,
         ...this.scope(actor, own),
         patientId: query.patientId ?? null,
         clinicId: query.clinicId ?? null,
@@ -157,12 +165,13 @@ export class SqlPreventionRepository extends PreventionRepository {
         from: query.from ?? null,
         to: query.to ?? null
       };
-      const where = ` WHERE ${EVENT_SCOPE} AND (CAST(:patientId AS UUID) IS NULL OR e."patientId"=:patientId)
+      const where =
+        ` WHERE ${EVENT_SCOPE} AND (CAST(:patientId AS UUID) IS NULL OR e."patientId"=:patientId)
         AND (CAST(:clinicId AS UUID) IS NULL OR e."clinicId"=:clinicId) AND (CAST(:typeId AS UUID) IS NULL OR e."typeId"=:typeId)
         AND (CAST(:status AS TEXT) IS NULL OR e.status=:status) AND (CAST(:from AS TIMESTAMPTZ) IS NULL OR e."dueAt">=CAST(:from AS TIMESTAMPTZ))
-        AND (CAST(:to AS TIMESTAMPTZ) IS NULL OR e."dueAt"<CAST(:to AS TIMESTAMPTZ))`;
+        AND (CAST(:to AS TIMESTAMPTZ) IS NULL OR e."dueAt"<CAST(:to AS TIMESTAMPTZ))` + listing.and;
       const items = await this.db.query<PreventionEvent>(
-        SELECT + where + ' ORDER BY e."dueAt",e.id LIMIT :limit OFFSET :offset',
+        SELECT + where + " ORDER BY " + listing.order + " LIMIT :limit OFFSET :offset",
         { replacements, transaction, type: QueryTypes.SELECT }
       );
       const [count] = await this.db.query<{ total: number }>(

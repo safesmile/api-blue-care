@@ -1,3 +1,4 @@
+import { sqlListQuery } from "../../../shared/infrastructure/sql-list-query";
 import { PermissionCode } from "../../../shared/domain/permission-code";
 import { PATIENT_SCOPE_SQL, requirePatientScope } from "./patient-scope";
 import { clinicScopeParams } from "../../clinics/infrastructure/clinic-scope";
@@ -110,15 +111,29 @@ export class SqlPatientRepository extends PatientRepository {
    * @returns The persisted result or completion of the authorized operation.
    */
   async list(query: PatientQuery, actor: AccessActor) {
+    const listing = sqlListQuery(
+      query,
+      {
+        name: { sql: '(p."firstName" || \' \' || p."lastName")', filter: "contains" },
+        email: { sql: "p.email", filter: "contains" },
+        enabled: { sql: "p.enabled", filter: "in" },
+        linked: { sql: '(p."userId" IS NOT NULL)', filter: "in" },
+        createdAt: { sql: 'p."createdAt"', filter: "dateRange" }
+      },
+      'p."lastName",p."firstName",p.id',
+      "p.id"
+    );
     if (query.clinicId) await this.access.require(query.clinicId, actor);
     const filter =
       "WHERE " +
       SCOPE +
       ` AND (:enabled IS NULL OR p.enabled=:enabled)
       AND (:clinicId IS NULL OR EXISTS(SELECT 1 FROM patient_clinics pc WHERE pc."patientId"=p.id AND pc."clinicId"=:clinicId))
-      AND (:search IS NULL OR (p."firstName" || ' ' || p."lastName") ILIKE :search ESCAPE '!' OR p.email ILIKE :search ESCAPE '!' OR p.phone ILIKE :search ESCAPE '!')`;
+      AND (:search IS NULL OR (p."firstName" || ' ' || p."lastName") ILIKE :search ESCAPE '!' OR p.email ILIKE :search ESCAPE '!' OR p.phone ILIKE :search ESCAPE '!')` +
+      listing.and;
     const replacements = {
       ...query,
+      ...listing.parameters,
       ...clinicScopeParams(actor),
       actorId: actor.id,
       enabled: query.enabled ?? null,
@@ -126,7 +141,7 @@ export class SqlPatientRepository extends PatientRepository {
       search: query.search === undefined ? null : "%" + query.search.replace(/[!%_]/g, "!$&") + "%"
     };
     const items = await this.db.query<PatientView>(
-      "SELECT p.* FROM patients p " + filter + ' ORDER BY p."lastName",p."firstName",p.id LIMIT :limit OFFSET :offset',
+      "SELECT p.* FROM patients p " + filter + " ORDER BY " + listing.order + " LIMIT :limit OFFSET :offset",
       { replacements, type: QueryTypes.SELECT }
     );
     const [count] = await this.db.query<{ total: number }>("SELECT COUNT(*)::int total FROM patients p " + filter, {

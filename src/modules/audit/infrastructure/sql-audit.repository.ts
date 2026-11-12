@@ -1,3 +1,4 @@
+import { sqlListQuery } from "../../../shared/infrastructure/sql-list-query";
 import { PermissionCode } from "../../../shared/domain/permission-code";
 import type { AccessActor } from "../../authorization/domain/access-policy";
 import { clinicScopeParams } from "../../clinics/infrastructure/clinic-scope";
@@ -74,17 +75,29 @@ export class SqlAuditRepository extends AuditRepository {
    * @returns Result of the completed operation.
    */
   async list(query: AuditQuery, actor: AccessActor) {
+    const listing = sqlListQuery(
+      query,
+      {
+        action: { sql: "a.action", filter: "contains" },
+        resourceType: { sql: 'a."resourceType"', filter: "contains" },
+        occurredAt: { sql: 'a."occurredAt"', filter: "dateRange" }
+      },
+      'a."occurredAt" DESC,a.id DESC',
+      "a.id"
+    );
     const conditions: string[] = [AUDIT_SCOPE];
     for (const key of ["actorId", "action", "resourceType", "resourceId"] as const)
       if (query[key]) conditions.push('a."' + key + '" = :' + (key === "actorId" ? "filterActorId" : key));
     if (query.from) conditions.push('"occurredAt" >= :from');
     if (query.to) conditions.push('"occurredAt" <= :to');
+    conditions.push(...listing.conditions);
     const where = conditions.length ? " WHERE " + conditions.join(" AND ") : "";
     const items = await this.db.query<AuditRecord>(
-      "SELECT a.* FROM audit_events a" + where + ' ORDER BY "occurredAt" DESC,id DESC LIMIT :limit OFFSET :offset',
+      "SELECT a.* FROM audit_events a" + where + " ORDER BY " + listing.order + " LIMIT :limit OFFSET :offset",
       {
         replacements: {
           ...query,
+          ...listing.parameters,
           ...clinicScopeParams(actor),
           filterActorId: query.actorId ?? null,
           globalAudit: (actor.globalPermissions ?? actor.permissions).includes(PermissionCode.AuditList)
@@ -97,6 +110,7 @@ export class SqlAuditRepository extends AuditRepository {
       {
         replacements: {
           ...query,
+          ...listing.parameters,
           ...clinicScopeParams(actor),
           filterActorId: query.actorId ?? null,
           globalAudit: (actor.globalPermissions ?? actor.permissions).includes(PermissionCode.AuditList)

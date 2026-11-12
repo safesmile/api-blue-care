@@ -135,9 +135,8 @@ describe("Separate collaborator and patient onboarding (disposable PostgreSQL)",
       .expect(200);
     await api(manager.token).get("/users").expect(403);
   });
-  it("requires a selected current clinic and rejects patient role or staff assignment injection", async () => {
+  it("automatically uses an assigned clinic and rejects patient role or staff assignment injection", async () => {
     const contact = { email: "people-patient@blue.test", firstName: "Patient", lastName: "Personal" };
-    await api().post("/auth/invitations/patients").send(contact).expect(400);
     for (const extra of [
       { roles: ["admin"] },
       { staff: true },
@@ -149,7 +148,8 @@ describe("Separate collaborator and patient onboarding (disposable PostgreSQL)",
         .send({ ...contact, ...extra })
         .expect(400);
     expect(receptionist.user.permissions).not.toContain("roles:assign");
-    patientInvite = (await api(receptionist.token).post("/auth/invitations/patients").send(contact).expect(201)).body;
+    const allClinics = await AuthUseCase.resolve(app).login(receptionist.user.email, password);
+    patientInvite = (await api(allClinics.token).post("/auth/invitations/patients").send(contact).expect(201)).body;
     expect(patientInvite).toMatchObject({ kind: "patient", staff: false, roles: ["customer"], clinicAssignments: [] });
     expect(patientInvite.patientId).toBeTruthy();
     const [row] = await db.query<{ clinicId: string; userId: string | null }>(
@@ -335,5 +335,69 @@ describe("Separate collaborator and patient onboarding (disposable PostgreSQL)",
       .send({})
       .expect(403);
     expect(mail).toHaveLength(deliveriesBefore);
+  });
+  it("filters the authorized set before counting, orders pages and rejects unlisted fields", async () => {
+    const filters = [
+      { field: "name", operator: "contains", value: "ReadScope" },
+      { field: "enabled", operator: "in", value: ["true"] },
+      { field: "createdAt", operator: "dateRange", value: { from: "2000-01-01", to: "2099-12-31" } }
+    ];
+    const params = new URLSearchParams({
+      filters: JSON.stringify(filters),
+      sortBy: "name",
+      sortOrder: "desc",
+      limit: "1",
+      offset: "0"
+    });
+    const first = (
+      await api(selected.token)
+        .get("/patients?" + params)
+        .expect(200)
+    ).body;
+    expect(first.total).toBe(2);
+    expect(first.items.map(item => item.lastName)).toEqual(["Second"]);
+    params.set("offset", "1");
+    const second = (
+      await api(selected.token)
+        .get("/patients?" + params)
+        .expect(200)
+    ).body;
+    expect(second.total).toBe(2);
+    expect(second.items.map(item => item.lastName)).toEqual(["First"]);
+    params.set("offset", "20");
+    const empty = (
+      await api(selected.token)
+        .get("/patients?" + params)
+        .expect(200)
+    ).body;
+    expect(empty).toEqual({ items: [], total: 2 });
+    await api().get("/patients?sortBy=passwordHash").expect(400);
+    const wildcard = new URLSearchParams({
+      filters: JSON.stringify([{ field: "name", operator: "contains", value: "%" }])
+    });
+    await api(selected.token)
+      .get("/patients?" + wildcard)
+      .expect(200, { items: [], total: 0 });
+    const invalid = new URLSearchParams({
+      filters: JSON.stringify([{ field: "createdAt", operator: "dateRange", value: { from: "2026-02-30" } }])
+    });
+    await api()
+      .get("/patients?" + invalid)
+      .expect(400);
+    const invitationParams = new URLSearchParams({
+      kind: "patient",
+      sortBy: "email",
+      sortOrder: "desc",
+      filters: JSON.stringify([{ field: "status", operator: "in", value: ["revoked", "accepted"] }])
+    });
+    const invitations = (
+      await api()
+        .get("/auth/invitations?" + invitationParams)
+        .expect(200)
+    ).body;
+    expect(invitations.total).toBeGreaterThan(1);
+    expect(invitations.items.every(item => ["revoked", "accepted"].includes(item.status))).toBe(true);
+    const emails = invitations.items.map(item => item.email);
+    expect(emails).toEqual([...emails].sort().reverse());
   });
 });

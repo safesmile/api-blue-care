@@ -1,3 +1,4 @@
+import { sqlListQuery } from "../../../shared/infrastructure/sql-list-query";
 import { recordChange } from "../../audit/infrastructure/record-change";
 import { roleChange } from "../domain/authorization.events";
 import {
@@ -47,11 +48,22 @@ export class SqlRolesRepository extends RolesRepository {
    * @returns Result of the completed operation.
    */
   async list(page: Pagination) {
-    const rows = await this.db.query<{ id: string }>("SELECT id FROM roles ORDER BY name LIMIT :limit OFFSET :offset", {
-      replacements: { ...page },
-      type: QueryTypes.SELECT
-    });
-    const counts = await this.db.query<{ total: number }>("SELECT COUNT(*)::int AS total FROM roles", {
+    const listing = sqlListQuery(
+      page,
+      { name: { sql: "name", filter: "contains" }, description: { sql: "description", filter: "contains" } },
+      "name",
+      "id"
+    );
+    const where = listing.where;
+    const rows = await this.db.query<{ id: string }>(
+      "SELECT id FROM roles" + where + " ORDER BY " + listing.order + " LIMIT :limit OFFSET :offset",
+      {
+        replacements: { ...page, ...listing.parameters },
+        type: QueryTypes.SELECT
+      }
+    );
+    const counts = await this.db.query<{ total: number }>("SELECT COUNT(*)::int AS total FROM roles" + where, {
+      replacements: listing.parameters,
       type: QueryTypes.SELECT
     });
     return {

@@ -97,6 +97,12 @@ Solo se preparó la configuración; no se ejecutaron servicios. Documentación d
 
 Listado: limit (1–100, defecto 25), offset (defecto 0), respuesta items/total. No hay registro público. Los permisos administrativos permiten asignar permisos y deben reservarse a administradores.
 
+Los listados que usan `ListQueryDto` aceptan además `sortBy`, `sortOrder` (`asc` o `desc`) y `filters` como arreglo JSON en un parámetro de consulta. Cada recurso declara sus campos y operadores admitidos. Los filtros se combinan con AND y el total se calcula sobre los registros autorizados y filtrados, antes de paginar.
+
+- Texto parcial: `{"field":"name","operator":"contains","value":"Ana"}`.
+- Opciones múltiples: `{"field":"status","operator":"in","value":["pending","accepted"]}`.
+- Rango de fechas: `{"field":"createdAt","operator":"dateRange","value":{"from":"2026-11-01","to":"2026-11-09"}}`. Se admite un solo extremo y ambos días se interpretan de forma inclusiva en la hora de Guatemala.
+
 Login devuelve token, refreshToken y user. El cliente debe coordinar una sola renovación y sustituir ambos tokens: la sesión anterior queda revocada. Logout y cambio de contraseña invalidan accesos activos. Invitaciones duran 24 horas y recuperación 30 minutos; son de un uso. Se almacenan hashes de los tokens. El cliente debe proteger refreshToken y no incluirlo en registros.
 
 ## Alcance M01

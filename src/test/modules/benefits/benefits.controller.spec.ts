@@ -28,6 +28,10 @@ describe("BenefitsController", () => {
   it("exposes explicit creation, immutable revisions and family configuration routes", async () => {
     await request(app.getHttpServer()).post("/benefits").send(input).expect(201);
     await request(app.getHttpServer())
+      .post("/benefits")
+      .send({ ...input, initialVersion: version })
+      .expect(201);
+    await request(app.getHttpServer())
       .get("/benefits?planId=" + id)
       .expect(200);
     await request(app.getHttpServer())
@@ -51,6 +55,7 @@ describe("BenefitsController", () => {
       .send({ maxBeneficiaries: 4 })
       .expect(200);
     expect(service.create).toHaveBeenCalledWith(input, actor);
+    expect(service.create).toHaveBeenCalledWith({ ...input, initialVersion: version }, actor);
     expect(service.version).toHaveBeenCalledWith(id, version, actor);
     expect(service.publish).toHaveBeenCalledWith(id, id, actor);
     expect(service.updateFamilySettings).toHaveBeenCalledWith(id, 4, actor);
@@ -59,6 +64,10 @@ describe("BenefitsController", () => {
     await request(app.getHttpServer())
       .post("/benefits")
       .send({ ...input, period: "daily" })
+      .expect(400);
+    await request(app.getHttpServer())
+      .post("/benefits")
+      .send({ ...input, initialVersion: { ...version, limitUnits: 0 } })
       .expect(400);
     await request(app.getHttpServer())
       .post("/benefits/" + id + "/versions")

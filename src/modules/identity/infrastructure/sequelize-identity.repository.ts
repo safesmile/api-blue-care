@@ -1,3 +1,4 @@
+import { sqlListQuery } from "../../../shared/infrastructure/sql-list-query";
 import { PermissionCode } from "../../../shared/domain/permission-code";
 import { recordChange } from "../../audit/infrastructure/record-change";
 import { identityChange } from "../domain/identity.events";
@@ -12,6 +13,13 @@ import { AuthorizationStore } from "../../authorization/infrastructure/authoriza
 import { User, type CollaboratorView } from "../domain/user";
 import { UserModel } from "./user.model";
 import type { Pagination } from "../../../shared/domain/crud.repository";
+const identityListFields = {
+  name: { sql: "u.name", filter: "contains" },
+  email: { sql: "u.email", filter: "contains" },
+  enabled: { sql: "u.enabled", filter: "in" },
+  verified: { sql: "u.verified", filter: "in" },
+  createdAt: { sql: 'u."createdAt"', filter: "dateRange" }
+} as const;
 /**
  * Maps domain users to PostgreSQL through Sequelize.
  */
@@ -104,14 +112,18 @@ export class SequelizeIdentityRepository extends IdentityRepository {
    * @returns Result of the completed operation.
    */
   async list(page: Pagination) {
-    const result = await this.model.findAndCountAll({
-      ...page,
-      order: [["id", "ASC"]]
+    const listing = sqlListQuery(page, identityListFields, "u.id", "u.id");
+    const where = listing.where;
+    const replacements = { limit: page.limit, offset: page.offset, ...listing.parameters };
+    const rows = await this.db.query(
+      "SELECT u.* FROM users u" + where + " ORDER BY " + listing.order + " LIMIT :limit OFFSET :offset",
+      { model: this.model, mapToModel: true, replacements }
+    );
+    const [count] = await this.db.query<{ total: number }>("SELECT COUNT(*)::int AS total FROM users u" + where, {
+      replacements,
+      type: QueryTypes.SELECT
     });
-    return {
-      items: await Promise.all(result.rows.map(row => this.map(row))),
-      total: result.count
-    };
+    return { items: await Promise.all(rows.map(row => this.map(row))), total: count.total };
   }
   /**
    * Lists staff identities with only clinics visible to the current staff administrator.
@@ -122,6 +134,7 @@ export class SequelizeIdentityRepository extends IdentityRepository {
    */
   async collaborators(page: Pagination, actor: AccessActor, id?: string) {
     return this.db.transaction({ isolationLevel: Transaction.ISOLATION_LEVELS.REPEATABLE_READ }, async transaction => {
+      const listing = sqlListQuery(page, identityListFields, "u.name,u.id", "u.id");
       const grants = await this.authorization.permissionsFor(
         await this.authorization.rolesFor(actor.id, transaction),
         transaction
@@ -130,13 +143,15 @@ export class SequelizeIdentityRepository extends IdentityRepository {
       const visible = `SELECT 1 FROM clinic_staff s JOIN clinics c ON c.id=s."clinicId"
         WHERE s."userId"=u.id AND c.enabled AND (:selected IS NULL OR c.id=CAST(:selected AS UUID))
         AND (:global OR blue_care_clinic_allowed(:actorId,c.id,CAST(:selected AS UUID),'clinics:staff-list'))`;
-      const filter = `WHERE (:id IS NULL OR u.id=CAST(:id AS UUID)) AND (EXISTS(SELECT 1 FROM staff_profiles sp WHERE sp."userId"=u.id)
+      const filter =
+        `WHERE (:id IS NULL OR u.id=CAST(:id AS UUID)) AND (EXISTS(SELECT 1 FROM staff_profiles sp WHERE sp."userId"=u.id)
         OR EXISTS(SELECT 1 FROM user_roles ur JOIN roles r ON r.id=ur."roleId"
         LEFT JOIN role_permissions rp ON rp."roleId"=r.id WHERE ur."userId"=u.id AND ur."clinicId" IS NULL
         AND (r.name='staff' OR rp."permissionCode" NOT IN (:personal))))
-      AND ((:global AND :selected IS NULL) OR EXISTS(${visible}))`;
+      AND ((:global AND :selected IS NULL) OR EXISTS(${visible}))` + listing.and;
       const replacements = {
         ...page,
+        ...listing.parameters,
         personal: PERSONAL_PERMISSION_CODES,
         id: id ?? null,
         actorId: actor.id,
@@ -144,7 +159,7 @@ export class SequelizeIdentityRepository extends IdentityRepository {
         global
       };
       const rows = await this.db.query<Omit<CollaboratorView, "roles" | "clinics">>(
-        `SELECT u.id,u.email,u.name,u."firstName",u."lastName",u.enabled,u.verified FROM users u ${filter} ORDER BY u.name,u.id LIMIT :limit OFFSET :offset`,
+        `SELECT u.id,u.email,u.name,u."firstName",u."lastName",u.enabled,u.verified FROM users u ${filter} ORDER BY ${listing.order} LIMIT :limit OFFSET :offset`,
         { replacements, transaction, type: QueryTypes.SELECT }
       );
       const [count] = await this.db.query<{ total: number }>(`SELECT COUNT(*)::int AS total FROM users u ${filter}`, {

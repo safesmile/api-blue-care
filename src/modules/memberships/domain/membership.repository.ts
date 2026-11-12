@@ -31,6 +31,7 @@ export interface MembershipRecord {
   checkoutExpiresAt: Date | null;
 }
 export interface MembershipView extends MembershipRecord {
+  patientName?: string;
   billingSync: "review" | "pending" | "stopped" | "paused" | "active" | "not-started";
   status: "pending" | "active" | "expired" | "suspended" | "cancelled";
   eligible: boolean;

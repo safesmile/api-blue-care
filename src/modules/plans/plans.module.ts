@@ -7,6 +7,7 @@ import { VersionPlanUseCase } from "./application/versionPlan.usecase";
 import { VersionsPlanUseCase } from "./application/versionsPlan.usecase";
 import { PublishPlanUseCase } from "./application/publishPlan.usecase";
 import { PlansController } from "./presentation/plans.controller";
+import { AssignPlanBenefitUseCase } from "./application/assignPlanBenefit.usecase";
 /** Provides versioned commercial definitions. */
 @Module({
   providers: [
@@ -15,6 +16,7 @@ import { PlansController } from "./presentation/plans.controller";
     VersionPlanUseCase,
     VersionsPlanUseCase,
     PublishPlanUseCase,
+    AssignPlanBenefitUseCase,
     { provide: PlanRepository, useClass: SqlPlanRepository }
   ],
   controllers: [PlansController]

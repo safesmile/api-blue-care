@@ -13,7 +13,7 @@ La migración `202611040002-plans-memberships.ts` agrega `plans`, `plan_versions
 
 ## Planes y precio contratado
 
-El plan tiene un código estable, estado habilitado y una referencia a su revisión publicada. Cada revisión conserva nombre, descripción, textos de beneficios, importe mensual final en centavos GTQ y explicación fiscal `taxDisclosure`. El importe anual se calcula en servidor como diez mensualidades; no se admite otro importe anual enviado por el cliente. Los precios son enteros, nunca valores monetarios en coma flotante.
+El plan tiene un código estable, estado habilitado y una referencia a su revisión publicada. Cada revisión conserva nombre, descripción, los importes finales mensual y anual en centavos GTQ y la explicación fiscal `taxDisclosure`. Administración fija ambos precios de forma independiente. Las revisiones anteriores conservan los precios y textos con los que se guardaron.
 
 Solo se usa GTQ. El importe mensual admite 500–100000000 centavos; el mínimo técnico de checkout en Recurrente es Q5. Los importes concretos todavía los debe definir administración. `monthlyPriceCents` debe ser el total final que se cobrará, con los impuestos aplicables ya considerados; el código no añade una tasa fiscal supuesta ni implementa FEL. El texto fiscal es obligatorio al crear una revisión. Antes de habilitar cobros hay que definir el precio final y configurar los datos fiscales de la cuenta de Recurrente.
 
@@ -83,7 +83,7 @@ Todas las rutas están bajo `/api/v1`.
 | POST | `/webhooks/recurrente` | Firma Svix válida; no JWT de usuario |
 | POST | `/internal/jobs/memberships/dispatch` | Google OIDC del job configurado |
 
-Crear un plan recibe `{ code }`. La primera revisión de Blue Care + debe usar su nombre comercial y el precio que apruebe el dueño, no un precio de fixture. Crear una revisión recibe `name`, `description`, `benefitDescriptions: string[]`, `monthlyPriceCents` y `taxDisclosure`. No admite `annualPriceCents` ni otra moneda.
+Crear un plan recibe `{ code }`. Crear una revisión recibe `name`, `description`, `monthlyPriceCents`, `annualPriceCents` y `taxDisclosure`. El campo opcional `benefitDescriptions` se conserva para clientes anteriores. Las asignaciones del catálogo se gestionan mediante `PUT /plans/:id/benefits/:benefitId` con `{ assigned: boolean }` y el permiso `plans:update`.
 
 Crear una membresía propia recibe `{ planVersionId, cadence: "monthly" | "annual" }`. La administrativa agrega `patientId`. La propiedad se obtiene de la relación paciente–cuenta, no de roles, correo enviado o parámetros `userId`. Los cuerpos administrativos y acciones admiten `reason` opcional validado para auditoría.
 
