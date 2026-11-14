@@ -78,7 +78,7 @@ export class PlansController extends CrudEntityController<CrudPlansUseCase> {
     return this.crud("read", id, request.user);
   }
   /**
-   * Appends an immutable commercial revision.
+   * Creates a commercial draft.
    * @param id Resource identifier.
    * @param input Validated operation fields.
    * @param request Request containing the authenticated identity or original webhook bytes.
@@ -92,7 +92,23 @@ export class PlansController extends CrudEntityController<CrudPlansUseCase> {
     return this.versionPlan.execute(id, input, request.user);
   }
   /**
-   * Lists immutable commercial history.
+   * Saves changes to an unpublished revision.
+   * @param id Resource identifier.
+   * @param draftId Draft revision identifier.
+   * @param input Validated revision fields.
+   * @param request Request containing the authenticated identity.
+   * @returns Updated draft.
+   */
+  @Patch(":id/versions/:draftId") @Permissions(PermissionCode.PlansVersion) updateDraft(
+    @Param("id", ParseUUIDPipe) id: string,
+    @Param("draftId", ParseUUIDPipe) draftId: string,
+    @Body() input: PlanVersionDto,
+    @Req() request: AuthRequest
+  ) {
+    return this.versionPlan.execute(id, { ...input, draftId }, request.user);
+  }
+  /**
+   * Lists commercial drafts and published history.
    * @param id Resource identifier.
    * @param page Bounded pagination values.
    * @param request Request containing the authenticated identity or original webhook bytes.

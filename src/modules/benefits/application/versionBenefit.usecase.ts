@@ -8,7 +8,7 @@ import { EntityUseCase, type OperationPolicy } from "../../../shared/application
 /** Caso de uso específico de Benefit. */
 @Injectable()
 export class VersionBenefitUseCase extends EntityUseCase<
-  [id: string, input: BenefitVersionInput, actor: AccessActor],
+  [id: string, input: BenefitVersionInput & { draftId?: string }, actor: AccessActor],
   Promise<BenefitVersion>
 > {
   protected readonly policy: OperationPolicy = { actorIndex: 2, permissions: [PermissionCode.BenefitsVersion] };

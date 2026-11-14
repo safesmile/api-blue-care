@@ -6,7 +6,7 @@ Implementación del paso 6 (04/11/2026). Decisiones de producto: business-rules.
 
 Cada definición del catálogo tiene código estable, tipo `discount`, `service` o `item`, destinatario `holder`, `beneficiaries` o `all` y período `monthly`, `annual` o `contract`. Estas dimensiones son inmutables. Una misma definición puede asignarse a varios planes. Quitar una asignación impide nuevos canjes para ese plan y conserva el historial y los consumos registrados.
 
-Las revisiones son inmutables: nombre, descripción, cupo entero (1–100000), habilitado y porcentaje en puntos básicos exclusivamente para descuentos (1500 = 15%). Crear una revisión no la publica. Publicar cambia inmediatamente la regla para miembros nuevos y actuales, conservando el precio contratado. Se descuentan los consumos existentes del mismo período; disponible = máximo(0, límite vigente − unidades consumidas no anuladas). No se vuelve a publicar una revisión histórica retirada. Los detalles comerciales de plans siguen separados de estas reglas cuantificables.
+Cada borrador permite editar nombre, descripción, cupo entero (1–100000), habilitado y porcentaje en puntos básicos exclusivamente para descuentos (1500 = 15%). Publicar congela la revisión y la convierte en la única regla vigente para miembros nuevos y actuales, que conservan su precio contratado. Se descuentan los consumos existentes del mismo período; disponible = máximo(0, límite vigente − unidades consumidas no anuladas). No se vuelve a publicar una revisión histórica retirada. Los detalles comerciales de plans siguen separados de estas reglas cuantificables.
 
 No se siembran porcentajes, entregas del kit ni beneficios comerciales inventados. Los importes y porcentajes presentes en pruebas son fixtures. Administración debe crear y publicar la lista real. No hay cálculo monetario ni redondeo de descuentos sobre facturas en este módulo.
 
@@ -49,6 +49,7 @@ Prefijo general `/api/v1`. Todos requieren sesión y política explícita; las r
 | GET /benefits/:id | Definición y revisión actual, benefits:read |
 | POST /benefits/:id/versions | Revisión, benefits:version |
 | GET /benefits/:id/versions | Historial de reglas, benefits:read |
+| PATCH /benefits/:id/versions/:draftId | Editar el borrador indicado, benefits:version |
 | POST /benefits/:id/versions/:versionId/publish | Publicar, benefits:publish |
 | GET /benefits/plans/:id/family-settings | Máximo familiar, benefits:read |
 | PUT /benefits/plans/:id/family-settings | `{maxBeneficiaries}`, benefits:family-settings |

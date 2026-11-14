@@ -1,6 +1,6 @@
 import { CrudEntityController } from "../../../shared/presentation/crud.controller";
 import { PermissionCode } from "../../../shared/domain/permission-code";
-import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Put, Query, Req } from "@nestjs/common";
+import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Put, Query, Req } from "@nestjs/common";
 import { CrudBenefitsUseCase } from "../application/crudBenefits.usecase";
 import { VersionBenefitUseCase } from "../application/versionBenefit.usecase";
 import { VersionsBenefitUseCase } from "../application/versionsBenefit.usecase";
@@ -94,7 +94,7 @@ export class BenefitsController extends CrudEntityController<CrudBenefitsUseCase
     return this.crud("read", id, request.user);
   }
   /**
-   * Appends an immutable rule revision.
+   * Creates a rule draft.
    * @param id Resource identifier.
    * @param input Validated operation fields.
    * @param request Request containing the authenticated identity.
@@ -108,7 +108,23 @@ export class BenefitsController extends CrudEntityController<CrudBenefitsUseCase
     return this.versionBenefit.execute(id, input, request.user);
   }
   /**
-   * Lists immutable rule revisions.
+   * Saves changes to an unpublished revision.
+   * @param id Resource identifier.
+   * @param draftId Draft revision identifier.
+   * @param input Validated revision fields.
+   * @param request Request containing the authenticated identity.
+   * @returns Updated draft.
+   */
+  @Patch(":id/versions/:draftId") @Permissions(PermissionCode.BenefitsVersion) updateDraft(
+    @Param("id", ParseUUIDPipe) id: string,
+    @Param("draftId", ParseUUIDPipe) draftId: string,
+    @Body() input: BenefitVersionDto,
+    @Req() request: AuthRequest
+  ) {
+    return this.versionBenefit.execute(id, { ...input, draftId }, request.user);
+  }
+  /**
+   * Lists rule drafts and published history.
    * @param id Resource identifier.
    * @param page Bounded pagination values.
    * @param request Request containing the authenticated identity.

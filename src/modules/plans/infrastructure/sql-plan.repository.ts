@@ -34,7 +34,7 @@ const ADMIN_FROM = ` LEFT JOIN plan_family_settings family ON family."planId"=p.
   ) draft ON TRUE`;
 const PLAN_SELECT = 'SELECT p.*,to_jsonb(v) AS "currentVersion", ' + PLAN_BENEFITS;
 const ADMIN_SELECT = PLAN_SELECT + ADMIN_DETAILS + PLAN_FROM + ADMIN_FROM;
-/** Stores immutable commercial revisions and a separately mutable publication pointer. */
+/** Stores commercial revisions and a separately mutable publication pointer. */
 @Injectable()
 export class SqlPlanRepository extends PlanRepository {
   /**
@@ -120,13 +120,13 @@ export class SqlPlanRepository extends PlanRepository {
     return { items, total: count.total };
   }
   /**
-   * Appends an immutable commercial revision.
+   * Creates or updates a commercial draft.
    * @param id Resource identifier.
    * @param input Validated operation fields.
    * @param actor Authenticated identity and current effective permissions.
    * @returns The persisted result or completion of the authorized operation.
    */
-  async version(id: string, input: PlanVersionInput, actor: AccessActor) {
+  async version(id: string, input: PlanVersionInput & { draftId?: string }, actor: AccessActor) {
     return this.db.transaction(async transaction => {
       const [plan] = await this.db.query<PlanView>("SELECT * FROM plans WHERE id=:id FOR UPDATE", {
         replacements: { id },
@@ -142,58 +142,70 @@ export class SqlPlanRepository extends PlanRepository {
         if (count.total !== input.benefitIds.length)
           throw new BadRequestException("Uno o más beneficios seleccionados no existen");
       }
-      const [next] = await this.db.query<{ number: number }>(
-        'SELECT COALESCE(MAX(number),0)+1 AS number FROM plan_versions WHERE "planId"=:id',
-        { replacements: { id }, transaction, type: QueryTypes.SELECT }
-      );
+      const [before] = input.draftId
+        ? await this.db.query<PlanVersion>('SELECT * FROM plan_versions WHERE id=:draftId AND "planId"=:id', {
+            replacements: { id, draftId: input.draftId },
+            transaction,
+            type: QueryTypes.SELECT
+          })
+        : [];
+      if (input.draftId && !before) throw new NotFoundException("La versión no pertenece a este plan");
+      if (before?.publishedAt) throw new ConflictException("Solo se pueden editar versiones sin publicar");
+
+      const fields = {
+        id,
+        versionId: before?.id ?? randomUUID(),
+        name: input.name.trim(),
+        description: input.description.trim(),
+        benefits: JSON.stringify(input.benefitDescriptions ?? before?.benefitDescriptions ?? []),
+        benefitIds: JSON.stringify(input.benefitIds ?? before?.benefitIds ?? null),
+        familyLimit: input.maxBeneficiaries ?? before?.maxBeneficiaries ?? null,
+        monthly: input.monthlyPriceCents,
+        annual: input.annualPriceCents,
+        tax: input.taxDisclosure.trim()
+      };
+      const benefitIdsSql =
+        "CASE WHEN CAST(:benefitIds AS JSONB)='null'::jsonb THEN NULL ELSE ARRAY(SELECT jsonb_array_elements_text(CAST(:benefitIds AS JSONB))::uuid) END";
       const [row] = await this.db.query<PlanVersion>(
-        `INSERT INTO plan_versions (id,"planId",number,name,description,"benefitDescriptions","benefitIds",
-          "monthlyPriceCents","annualPriceCents",currency,"taxDisclosure","maxBeneficiaries","createdAt")
-        VALUES (:versionId,:id,:number,:name,:description,CAST(:benefits AS JSONB),
-          CASE WHEN :benefitIds IS NULL THEN NULL ELSE ARRAY(SELECT jsonb_array_elements_text(CAST(:benefitIds AS JSONB))::uuid) END,
-          :monthly,:annual,'GTQ',:tax,:familyLimit,NOW()) RETURNING *`,
-        {
-          replacements: {
-            id,
-            versionId: randomUUID(),
-            number: next.number,
-            name: input.name.trim(),
-            description: input.description.trim(),
-            benefits: JSON.stringify(input.benefitDescriptions ?? []),
-            benefitIds: input.benefitIds ? JSON.stringify(input.benefitIds) : null,
-            familyLimit: input.maxBeneficiaries ?? null,
-            monthly: input.monthlyPriceCents,
-            annual: input.annualPriceCents,
-            tax: input.taxDisclosure.trim()
-          },
-          transaction,
-          type: QueryTypes.SELECT
-        }
+        before
+          ? `UPDATE plan_versions SET name=:name,description=:description,"benefitDescriptions"=CAST(:benefits AS JSONB),
+              "benefitIds"=${benefitIdsSql},"monthlyPriceCents"=:monthly,"annualPriceCents"=:annual,
+              "taxDisclosure"=:tax,"maxBeneficiaries"=:familyLimit
+            WHERE id=:versionId AND "planId"=:id AND "publishedAt" IS NULL RETURNING *`
+          : `INSERT INTO plan_versions (id,"planId",number,name,description,"benefitDescriptions","benefitIds",
+              "monthlyPriceCents","annualPriceCents",currency,"taxDisclosure","maxBeneficiaries","createdAt")
+            SELECT CAST(:versionId AS uuid),CAST(:id AS uuid),COALESCE(MAX(number),0)+1,:name,:description,CAST(:benefits AS JSONB),
+              ${benefitIdsSql},:monthly,:annual,'GTQ',:tax,:familyLimit,NOW()
+            FROM plan_versions WHERE "planId"=:id RETURNING *`,
+        { replacements: fields, transaction, type: QueryTypes.SELECT }
       );
+      if (!row) throw new ConflictException("Solo se pueden editar versiones sin publicar");
+      const auditedFields = [
+        "id",
+        "number",
+        "name",
+        "description",
+        "benefitDescriptions",
+        "benefitIds",
+        "maxBeneficiaries",
+        "monthlyPriceCents",
+        "annualPriceCents",
+        "currency",
+        "taxDisclosure"
+      ] as const;
       await recordChange(this.db, transaction, {
-        action: "plan.version-created",
+        action: before ? "plan.version-updated" : "plan.version-created",
         resourceType: "plan",
         resourceId: id,
         actorId: actor.id,
-        after: auditSnapshot(row, [
-          "id",
-          "number",
-          "name",
-          "description",
-          "benefitDescriptions",
-          "benefitIds",
-          "maxBeneficiaries",
-          "monthlyPriceCents",
-          "annualPriceCents",
-          "currency",
-          "taxDisclosure"
-        ])
+        before: before && auditSnapshot(before, auditedFields),
+        after: auditSnapshot(row, auditedFields)
       });
       return row;
     });
   }
   /**
-   * Lists immutable commercial history.
+   * Lists commercial drafts and published history.
    * @param id Resource identifier.
    * @param page Bounded pagination values.
    * @returns The persisted result or completion of the authorized operation.

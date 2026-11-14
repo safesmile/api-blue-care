@@ -334,6 +334,48 @@ describe("Atomic global benefits and individual family quota (disposable Postgre
     await api().put(assignment(plan.id, holder.id)).send({ assigned: true }).expect(204);
     expect(await balance(holder.id)).toMatchObject({ usedUnits: 1, remainingUnits: 0 });
   });
+  it("edits a benefit draft in place and protects both current and historical publications", async () => {
+    const initialVersion = { name: "Borrador", description: "Beneficio de prueba", limitUnits: 1, enabled: true };
+    const { id, latestDraft } = (
+      await api()
+        .post("/benefits")
+        .send({ code: "editable-draft", kind: "service", period: "monthly", audience: "holder", initialVersion })
+        .expect(201)
+    ).body;
+    const versions = "/benefits/" + id + "/versions";
+    const draft = versions + "/" + latestDraft.id;
+    const updated = { ...initialVersion, name: "Revisado", limitUnits: 2 };
+    await api(owner.token).patch(draft).send(updated).expect(403);
+    expect((await api().patch(draft).send(updated).expect(200)).body).toMatchObject({
+      ...updated,
+      id: latestDraft.id,
+      number: 1,
+      publishedAt: null
+    });
+    expect((await api().get(versions).expect(200)).body.total).toBe(1);
+    await api()
+      .post(draft + "/publish")
+      .expect(201);
+    await api().patch(draft).send(initialVersion).expect(409);
+    const next = (await api().post(versions).send(initialVersion).expect(201)).body;
+    expect(
+      (
+        await api()
+          .get("/benefits/" + id)
+          .expect(200)
+      ).body.currentVersion
+    ).toMatchObject(updated);
+    const published = (
+      await api()
+        .post(versions + "/" + next.id + "/publish")
+        .expect(201)
+    ).body;
+    expect(published.currentVersion.id).toBe(next.id);
+    await api().patch(draft).send(initialVersion).expect(409);
+    await expect(
+      db.query("UPDATE benefit_versions SET name='Changed' WHERE id=:id", { replacements: { id: latestDraft.id } })
+    ).rejects.toThrow();
+  });
   it("publishes draft benefits and the family limit atomically", async () => {
     const other = (await api().post("/plans").send({ code: "public-benefit-offer" }).expect(201)).body;
     const path = "/plans/" + other.id + "/versions";
@@ -368,12 +410,24 @@ describe("Atomic global benefits and individual family quota (disposable Postgre
       latestDraft: { id: draft.id, maxBeneficiaries: 6 },
       draftBenefits: [{ id: holder.id }]
     });
+    const draftPath = path + "/" + draft.id;
+    const revisedOffer = { ...offer, name: "Revised offer", monthlyPriceCents: 8500 };
+    expect((await api().patch(draftPath).send(revisedOffer).expect(200)).body).toMatchObject({
+      ...revisedOffer,
+      id: draft.id,
+      number: draft.number,
+      benefitIds: [holder.id],
+      maxBeneficiaries: 6,
+      publishedAt: null
+    });
+    expect((await api().get(path).expect(200)).body.total).toBe(1);
     await api()
       .post(path + "/" + draft.id + "/publish")
       .expect(201);
     expect((await publicOffers().query(filter).expect(200)).body.items).toMatchObject([
-      { id: other.id, currentVersion: offer, benefits: [{ id: holder.id }] }
+      { id: other.id, currentVersion: revisedOffer, benefits: [{ id: holder.id }] }
     ]);
+    await api().patch(draftPath).send(offer).expect(409);
     const next = (
       await api()
         .post(path)
@@ -384,6 +438,7 @@ describe("Atomic global benefits and individual family quota (disposable Postgre
     await api()
       .post(path + "/" + next.id + "/publish")
       .expect(201);
+    await api().patch(draftPath).send(offer).expect(409);
     expect((await publicOffers().query(filter).expect(200)).body.items[0].benefits).toEqual([]);
     expect(
       (

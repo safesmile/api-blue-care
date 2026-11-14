@@ -8,7 +8,7 @@ import { EntityUseCase, type OperationPolicy } from "../../../shared/application
 /** Caso de uso específico de Plan. */
 @Injectable()
 export class VersionPlanUseCase extends EntityUseCase<
-  [id: string, input: PlanVersionInput, actor: AccessActor],
+  [id: string, input: PlanVersionInput & { draftId?: string }, actor: AccessActor],
   Promise<PlanVersion>
 > {
   protected readonly policy: OperationPolicy = { actorIndex: 2, permissions: [PermissionCode.PlansVersion] };

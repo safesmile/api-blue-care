@@ -70,7 +70,7 @@ export class SqlBenefitRepository extends BenefitRepository {
           actorId: actor.id,
           after: { ...definition, id }
         });
-        if (initialVersion) await this.insertVersion(id, definition.kind, 1, initialVersion, actor, transaction);
+        if (initialVersion) await this.saveVersion(id, definition.kind, 1, initialVersion, actor, transaction);
       });
     } catch (error) {
       if (error instanceof UniqueConstraintError) throw new ConflictException("El código del beneficio ya existe");
@@ -129,13 +129,13 @@ export class SqlBenefitRepository extends BenefitRepository {
     return { items, total: count.total };
   }
   /**
-   * Appends an immutable rule revision.
+   * Creates or updates a rule draft.
    * @param id Resource identifier.
    * @param input Validated operation fields.
    * @param actor Authenticated identity and current effective permissions.
    * @returns The persisted result or completion of the authorized operation.
    */
-  async version(id: string, input: BenefitVersionInput, actor: AccessActor) {
+  async version(id: string, input: BenefitVersionInput & { draftId?: string }, actor: AccessActor) {
     return this.db.transaction(async transaction => {
       const [benefit] = await this.db.query<BenefitView>("SELECT * FROM benefit_definitions WHERE id=:id FOR UPDATE", {
         replacements: { id },
@@ -143,11 +143,20 @@ export class SqlBenefitRepository extends BenefitRepository {
         type: QueryTypes.SELECT
       });
       if (!benefit) throw new NotFoundException("No se encontró el beneficio");
+      if (input.draftId) {
+        const [draft] = await this.db.query<BenefitVersion>(
+          'SELECT * FROM benefit_versions WHERE id=:draftId AND "benefitId"=:id',
+          { replacements: { id, draftId: input.draftId }, transaction, type: QueryTypes.SELECT }
+        );
+        if (!draft) throw new NotFoundException("La versión no pertenece a este beneficio");
+        if (draft.publishedAt) throw new ConflictException("Solo se pueden editar versiones sin publicar");
+        return this.saveVersion(id, benefit.kind, draft.number, input, actor, transaction, draft);
+      }
       const [next] = await this.db.query<{ number: number }>(
         'SELECT COALESCE(MAX(number),0)+1 AS number FROM benefit_versions WHERE "benefitId"=:id',
         { replacements: { id }, transaction, type: QueryTypes.SELECT }
       );
-      return this.insertVersion(id, benefit.kind, next.number, input, actor, transaction);
+      return this.saveVersion(id, benefit.kind, next.number, input, actor, transaction);
     });
   }
   /**
@@ -158,28 +167,34 @@ export class SqlBenefitRepository extends BenefitRepository {
    * @param input Draft values.
    * @param actor Authenticated operator.
    * @param transaction Open transaction.
-   * @returns Created revision.
+   * @param before Existing draft when updating.
+   * @returns Saved revision.
    */
-  private async insertVersion(
+  private async saveVersion(
     id: string,
     kind: BenefitView["kind"],
     number: number,
     input: BenefitVersionInput,
     actor: AccessActor,
-    transaction: Transaction
+    transaction: Transaction,
+    before?: BenefitVersion
   ) {
     if ((kind === "discount") !== (input.discountBasisPoints !== undefined && input.discountBasisPoints !== null))
       throw new BadRequestException(
         "Los descuentos requieren puntos básicos; los servicios y artículos deben omitirlos"
       );
     const [row] = await this.db.query<BenefitVersion>(
-      `INSERT INTO benefit_versions (id,"benefitId",number,name,description,"limitUnits","discountBasisPoints",enabled,"createdAt")
+      before
+        ? `UPDATE benefit_versions SET name=:name,description=:description,"limitUnits"=:limitUnits,
+            "discountBasisPoints"=:discountBasisPoints,enabled=:enabled
+          WHERE id=:versionId AND "benefitId"=:id AND "publishedAt" IS NULL RETURNING *`
+        : `INSERT INTO benefit_versions (id,"benefitId",number,name,description,"limitUnits","discountBasisPoints",enabled,"createdAt")
        VALUES (:versionId,:id,:number,:name,:description,:limitUnits,:discountBasisPoints,:enabled,NOW()) RETURNING *`,
       {
         replacements: {
           ...input,
           id,
-          versionId: randomUUID(),
+          versionId: before?.id ?? randomUUID(),
           number,
           discountBasisPoints: input.discountBasisPoints ?? null
         },
@@ -187,17 +202,28 @@ export class SqlBenefitRepository extends BenefitRepository {
         type: QueryTypes.SELECT
       }
     );
+    if (!row) throw new ConflictException("Solo se pueden editar versiones sin publicar");
+    const auditedFields = [
+      "id",
+      "number",
+      "name",
+      "description",
+      "limitUnits",
+      "discountBasisPoints",
+      "enabled"
+    ] as const;
     await recordChange(this.db, transaction, {
-      action: "benefit.version-created",
+      action: before ? "benefit.version-updated" : "benefit.version-created",
       resourceType: "benefit",
       resourceId: id,
       actorId: actor.id,
-      after: auditSnapshot(row, ["id", "number", "name", "description", "limitUnits", "discountBasisPoints", "enabled"])
+      before: before && auditSnapshot(before, auditedFields),
+      after: auditSnapshot(row, auditedFields)
     });
     return row;
   }
   /**
-   * Lists immutable rule revisions.
+   * Lists rule drafts and published history.
    * @param id Resource identifier.
    * @param page Bounded pagination values.
    * @returns The persisted result or completion of the authorized operation.

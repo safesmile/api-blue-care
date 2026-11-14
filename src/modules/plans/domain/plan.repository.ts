@@ -51,7 +51,11 @@ export abstract class PlanRepository {
   abstract create(code: string, actor: AccessActor): Promise<PlanView>;
   abstract read(id: string): Promise<PlanView | null>;
   abstract list(page: Pagination, catalog: boolean): Promise<Page<PlanView>>;
-  abstract version(id: string, input: PlanVersionInput, actor: AccessActor): Promise<PlanVersion>;
+  abstract version(
+    id: string,
+    input: PlanVersionInput & { draftId?: string },
+    actor: AccessActor
+  ): Promise<PlanVersion>;
   abstract versions(id: string, page: Pagination): Promise<Page<PlanVersion>>;
   abstract publish(id: string, versionId: string, actor: AccessActor): Promise<PlanView>;
   abstract update(id: string, enabled: boolean, actor: AccessActor): Promise<PlanView>;

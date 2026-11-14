@@ -13,11 +13,11 @@ La migración `202611040002-plans-memberships.ts` agrega `plans`, `plan_versions
 
 ## Planes y precio contratado
 
-El plan tiene un código estable, estado habilitado y una referencia a su revisión publicada. Cada revisión conserva nombre, descripción, los importes finales mensual y anual en centavos GTQ y la explicación fiscal `taxDisclosure`. Administración fija ambos precios de forma independiente. Las revisiones anteriores conservan los precios y textos con los que se guardaron.
+El plan tiene un código estable, estado habilitado y una referencia a su revisión publicada. Cada revisión conserva nombre, descripción, los importes finales mensual y anual en centavos GTQ y la explicación fiscal `taxDisclosure`. Administración fija ambos precios de forma independiente. Las revisiones publicadas conservan los precios y textos con los que se publicaron.
 
 Solo se usa GTQ. El importe mensual admite 500–100000000 centavos; el mínimo técnico de checkout en Recurrente es Q5. Los importes concretos todavía los debe definir administración. `monthlyPriceCents` debe ser el total final que se cobrará, con los impuestos aplicables ya considerados; el código no añade una tasa fiscal supuesta ni implementa FEL. El texto fiscal es obligatorio al crear una revisión. Antes de habilitar cobros hay que definir el precio final y configurar los datos fiscales de la cuenta de Recurrente.
 
-Crear una revisión no la publica. Publicar es una acción explícita que cambia inmediatamente la revisión visible y la oferta para nuevos contratos. Las revisiones anteriores permanecen inmutables; no se pueden editar, borrar o truncar por las operaciones SQL ordinarias protegidas. Para corregir o volver a condiciones anteriores se crea otra revisión. Una revisión publicada histórica no se vuelve a publicar sobre otra; repetir la publicación de la revisión actual es idempotente.
+Crear o editar un borrador conserva la oferta vigente. Publicar es una acción explícita que cambia inmediatamente la única revisión visible y la oferta para nuevos contratos. Una vez publicada, una revisión queda protegida contra edición, borrado y truncado en PostgreSQL. Para corregir o volver a condiciones anteriores se crea otra revisión. Una revisión publicada histórica no se vuelve a publicar sobre otra; repetir la publicación de la revisión actual es idempotente.
 
 Cada membresía guarda `planVersionId`, `amountCents`, `currency` y `cadence` propios. PostgreSQL impide reescribir esos campos o cambiar el paciente contratado. Una revisión nueva no modifica esos importes, ni los cobros de renovación del mismo contrato. La respuesta separa:
 
@@ -67,6 +67,7 @@ Todas las rutas están bajo `/api/v1`.
 | GET | `/plans` | `plans:list` |
 | GET | `/plans/:id` | `plans:read` |
 | POST / GET | `/plans/:id/versions` | `plans:version` / `plans:read` |
+| PATCH | `/plans/:id/versions/:draftId` | `plans:version`; edita el borrador indicado |
 | POST | `/plans/:id/versions/:versionId/publish` | `plans:publish` |
 | PATCH | `/plans/:id` | `plans:update`; cuerpo `{ enabled }` |
 | GET | `/plans/catalog` | `plans:catalog`; solo publicados y habilitados |

@@ -41,7 +41,11 @@ export abstract class BenefitRepository {
   abstract create(input: BenefitInput, actor: AccessActor): Promise<BenefitView>;
   abstract read(id: string): Promise<BenefitView | null>;
   abstract list(query: BenefitQuery): Promise<Page<BenefitView>>;
-  abstract version(id: string, input: BenefitVersionInput, actor: AccessActor): Promise<BenefitVersion>;
+  abstract version(
+    id: string,
+    input: BenefitVersionInput & { draftId?: string },
+    actor: AccessActor
+  ): Promise<BenefitVersion>;
   abstract versions(id: string, page: Pagination): Promise<Page<BenefitVersion>>;
   abstract publish(id: string, versionId: string, actor: AccessActor): Promise<BenefitView>;
   abstract familySettings(planId: string): Promise<{ planId: string; maxBeneficiaries: number }>;

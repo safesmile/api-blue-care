@@ -54,6 +54,8 @@ describe("TypeScript database commands", () => {
     });
     expect(users).toEqual([{ id }]);
     execute("db:migrate:undo");
+    expect(await db.getQueryInterface().describeTable("plan_versions")).toHaveProperty("maxBeneficiaries");
+    execute("db:migrate:undo");
     expect(await db.getQueryInterface().describeTable("plan_versions")).not.toHaveProperty("maxBeneficiaries");
     execute("db:migrate:undo");
     expect(await db.getQueryInterface().describeTable("plan_versions")).not.toHaveProperty("benefitIds");
